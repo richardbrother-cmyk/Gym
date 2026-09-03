@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Gym Tracker</title>
+  <meta name="description" content="Seguimiento de rutinas de gimnasio con series, repeticiones, peso e histórico de progreso.">
+  <meta name="theme-color" content="#0b1020">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Gym Tracker">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="icons/icon.svg" alt="" width="28" height="28">
+      <span>Gym Tracker</span>
+    </div>
+    <button id="btn-install" class="btn btn-accent btn-sm" hidden>Instalar app</button>
+  </header>
+
+  <main id="view" class="view" aria-live="polite"></main>
+
+  <nav class="tabs" aria-label="Secciones">
+    <button class="tab" data-tab="routines"><span class="tab-ico">📋</span>Rutinas</button>
+    <button class="tab" data-tab="exercises"><span class="tab-ico">🎬</span>Ejercicios</button>
+    <button class="tab" data-tab="history"><span class="tab-ico">🗓️</span>Historial</button>
+    <button class="tab" data-tab="progress"><span class="tab-ico">📈</span>Progreso</button>
+  </nav>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <div id="modal-root"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
