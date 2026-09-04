@@ -509,7 +509,11 @@
       const reps = el('input', { class: 'input num', type: 'number', inputmode: 'numeric', min: 0, value: s.reps,
         onchange: (e) => { s.reps = Math.max(0, parseInt(e.target.value, 10) || 0); e.target.value = s.reps; save(); } });
       const weight = el('input', { class: 'input num', type: 'number', inputmode: 'decimal', min: 0, step: '0.5', value: s.weight,
-        onchange: (e) => { s.weight = Math.max(0, parseFloat(String(e.target.value).replace(',', '.')) || 0); e.target.value = s.weight; save(); } });
+        onchange: (e) => {
+          s.weight = Math.max(0, parseFloat(String(e.target.value).replace(',', '.')) || 0); e.target.value = s.weight;
+          s.wTouched = true;
+          if (propagateWeight(entry, i)) render(); else save();
+        } });
       row.append(
         el('span', { class: 'idx' }, i + 1), reps, weight,
         el('button', { class: 'done-btn', 'aria-label': s.done ? 'Desmarcar serie' : 'Marcar serie hecha', onclick: () => toggleSet(entry, s, i) }, s.done ? '✓' : '○'));
@@ -536,11 +540,21 @@
       el('a', { href: '#', onclick: (e) => { e.preventDefault(); changeRest(); } }, 'cambiar')));
   }
 
+  // Autorrellena los kilos en las series siguientes del mismo ejercicio que no estén hechas ni editadas a mano.
+  function propagateWeight(entry, i) {
+    const w = entry.sets[i].weight;
+    let changed = false;
+    entry.sets.forEach((n, j) => {
+      if (j > i && !n.done && !n.wTouched && n.weight !== w) { n.weight = w; changed = true; }
+    });
+    save();
+    return changed;
+  }
+
   function toggleSet(entry, s, i) {
     s.done = !s.done;
     if (s.done) {
-      // Copia peso a las series siguientes que aún no se hayan tocado (comodidad)
-      entry.sets.forEach((n, j) => { if (j > i && !n.done && !n.weight) n.weight = s.weight; });
+      propagateWeight(entry, i);
       startRest(state.settings.rest);
       const pb = personalBests(entry.exerciseId);
       if (s.weight && s.weight > pb.maxWeight && s.reps > 0) toast('🏆 ¡Nuevo récord de peso!');
