@@ -18,6 +18,17 @@
     { id: 'jalon-a-la-barbilla',   name: 'Jalón a la barbilla',      muscle: 'Hombros / Trapecio',   media: 'video' },
     { id: 'espalda-baja',          name: 'Espalda baja',             muscle: 'Lumbares',             media: 'video' },
     { id: 'press-pecho-declinado', name: 'Press de pecho declinado', muscle: 'Pecho inferior',       media: 'video' },
+    // Hombro, bíceps y tríceps
+    { id: 'press-militar-mancuernas-sentado',  name: 'Press militar con mancuernas sentado',      muscle: 'Hombros',            media: 'video' },
+    { id: 'laterales-mancuernas-de-pie',       name: 'Laterales con mancuernas de pie',           muscle: 'Hombro lateral',     media: 'video' },
+    { id: 'posterior-unilateral-polea-alta',   name: 'Posterior unilateral en polea alta',        muscle: 'Hombro posterior',   media: 'video', dark: true, wide: true },
+    { id: 'frontal-unilateral-mancuernas',     name: 'Frontal unilateral con mancuernas',         muscle: 'Hombro anterior',    media: 'image', wide: true },
+    { id: 'curl-biceps-barra-z',               name: 'Curl de bíceps con barra Z',                muscle: 'Bíceps',             media: 'video' },
+    { id: 'extension-polea-alta-barra',        name: 'Extensión en polea alta con barra',         muscle: 'Tríceps',            media: 'video' },
+    { id: 'curl-martillo-unilateral-sentado',  name: 'Curl martillo con mancuernas unilateral sentado', muscle: 'Bíceps / Braquial', media: 'video' },
+    { id: 'extension-polea-alta-cuerda',       name: 'Extensión en polea alta con cuerda',        muscle: 'Tríceps',            media: 'video' },
+    { id: 'predicador',                        name: 'Predicador',                                muscle: 'Bíceps',             media: 'image' },
+    { id: 'extension-trasnuca-polea-cuerda',   name: 'Extensión trasnuca en polea alta con cuerda', muscle: 'Tríceps (cabeza larga)', media: 'image', wide: true },
   ];
 
   const DEFAULT_ROUTINES = [
@@ -41,7 +52,24 @@
         { exerciseId: 'espalda-baja', sets: 4, reps: 20 },
       ],
     },
+    {
+      id: 'rutina-hombro-brazo', name: 'Martes y Viernes · Hombro, bíceps y tríceps',
+      notes: 'Bloque 1: hombro (4 ejercicios). Bloque 2: curl con barra Z alternado con extensión con barra. Bloque 3: cuatriserie (los 4 últimos seguidos).',
+      items: [
+        { exerciseId: 'press-militar-mancuernas-sentado', sets: 4, reps: 10 },
+        { exerciseId: 'laterales-mancuernas-de-pie', sets: 4, reps: 10 },
+        { exerciseId: 'posterior-unilateral-polea-alta', sets: 4, reps: 10 },
+        { exerciseId: 'frontal-unilateral-mancuernas', sets: 4, reps: 10 },
+        { exerciseId: 'curl-biceps-barra-z', sets: 4, reps: 10 },
+        { exerciseId: 'extension-polea-alta-barra', sets: 4, reps: 10 },
+        { exerciseId: 'curl-martillo-unilateral-sentado', sets: 4, reps: 10 },
+        { exerciseId: 'extension-polea-alta-cuerda', sets: 4, reps: 10 },
+        { exerciseId: 'predicador', sets: 4, reps: 10 },
+        { exerciseId: 'extension-trasnuca-polea-cuerda', sets: 4, reps: 10 },
+      ],
+    },
   ];
+  const cloneRoutine = (r) => ({ ...r, items: r.items.map((i) => ({ ...i })) });
 
   /* ---------- Estado ---------- */
   const state = load();
@@ -50,7 +78,8 @@
     let saved = null;
     try { saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch (_) { saved = null; }
     const base = {
-      routines: DEFAULT_ROUTINES.map((r) => ({ ...r, items: r.items.map((i) => ({ ...i })) })),
+      routines: DEFAULT_ROUTINES.map(cloneRoutine),
+      seeded: DEFAULT_ROUTINES.map((r) => r.id),
       customExercises: [],
       sessions: [],
       active: null,
@@ -58,8 +87,12 @@
       ui: { tab: 'routines', screen: 'tab', progressEx: null, progressMetric: 'maxWeight' },
     };
     if (!saved) return base;
+    // Rutinas de ejemplo añadidas en versiones nuevas: se agregan una sola vez (si el usuario las borra, no vuelven).
+    const seeded = new Set(saved.seeded || ['rutina-a', 'rutina-b']);
+    const routines = (saved.routines || []).slice();
+    for (const r of DEFAULT_ROUTINES) if (!seeded.has(r.id)) { routines.push(cloneRoutine(r)); seeded.add(r.id); }
     return {
-      ...base, ...saved,
+      ...base, ...saved, routines, seeded: [...seeded],
       settings: { ...base.settings, ...(saved.settings || {}) },
       ui: { ...base.ui, ...(saved.ui || {}), screen: saved.active ? (saved.ui?.screen || 'tab') : 'tab' },
     };
@@ -147,7 +180,7 @@
       return el('div', { class: 'media-box dark' }, el('span', { class: 'muted', style: { fontSize: '3rem' } }, '🏋️'));
     }
     if (ex.media === 'image') {
-      return el('div', { class: 'media-box' }, el('img', { src: `media/${ex.id}.jpg`, alt: ex.name, loading: 'lazy' }));
+      return el('div', { class: 'media-box' + (ex.wide ? ' wide' : '') }, el('img', { src: `media/${ex.id}.jpg`, alt: ex.name, loading: 'lazy' }));
     }
     const video = el('video', {
       src: `media/${ex.id}.mp4`, poster: `media/thumbs/${ex.id}.jpg`,
@@ -156,7 +189,7 @@
     video.muted = true; // el atributo no siempre basta para autoplay en iOS
     if (autoplay) video.play?.().catch(() => {});
     video.addEventListener('click', () => (video.paused ? video.play() : video.pause()));
-    return el('div', { class: 'media-box' + (ex.dark ? ' dark' : '') }, video);
+    return el('div', { class: 'media-box' + (ex.dark ? ' dark' : '') + (ex.wide ? ' wide' : '') }, video);
   }
   const thumbSrc = (ex) => (ex.media ? `media/thumbs/${ex.id}.jpg` : 'icons/icon.svg');
 
@@ -247,7 +280,8 @@
         el('div', { class: 'row between' },
           el('div', { class: 'grow' },
             el('h2', {}, r.name),
-            el('div', { class: 'small muted' }, `${r.items.length} ejercicios · ${totalSets} series` + (last ? ` · última vez ${fmtDate(last.startedAt)}` : ' · nunca realizada'))),
+            el('div', { class: 'small muted' }, `${r.items.length} ejercicios · ${totalSets} series` + (last ? ` · última vez ${fmtDate(last.startedAt)}` : ' · nunca realizada')),
+            r.notes ? el('div', { class: 'small notes' }, '📝 ', r.notes) : null),
         ),
         el('div', { class: 'ex-list mt' },
           r.items.map((it) => {
@@ -281,7 +315,7 @@
   /* ---------- Editor de rutina ---------- */
   let draft = null;
   function startEditor(r) {
-    draft = r ? { id: r.id, name: r.name, items: r.items.map((i) => ({ ...i })) } : { id: null, name: '', items: [] };
+    draft = r ? { id: r.id, name: r.name, notes: r.notes || '', items: r.items.map((i) => ({ ...i })) } : { id: null, name: '', notes: '', items: [] };
     go('editor');
   }
   function renderEditor() {
@@ -293,6 +327,8 @@
 
     view.append(el('label', { class: 'field' }, el('span', {}, 'Nombre de la rutina'),
       el('input', { class: 'input', value: draft.name, placeholder: 'Ej. Rutina A · Pecho y espalda', oninput: (e) => { draft.name = e.target.value; } })));
+    view.append(el('label', { class: 'field' }, el('span', {}, 'Notas (opcional)'),
+      el('textarea', { class: 'input', rows: 2, placeholder: 'Ej. Bloque 2 alternado, bloque 3 en cuatriserie…', oninput: (e) => { draft.notes = e.target.value; } }, draft.notes)));
 
     const list = el('div', { class: 'stack' });
     if (!draft.items.length) list.append(el('div', { class: 'empty' }, 'Añade ejercicios con el botón de abajo.'));
@@ -323,9 +359,9 @@
     if (!draft.items.length) return toast('Añade al menos un ejercicio');
     if (draft.id) {
       const r = state.routines.find((x) => x.id === draft.id);
-      if (r) { r.name = name; r.items = draft.items; }
+      if (r) { r.name = name; r.notes = draft.notes.trim(); r.items = draft.items; }
     } else {
-      state.routines.push({ id: uid(), name, items: draft.items });
+      state.routines.push({ id: uid(), name, notes: draft.notes.trim(), items: draft.items });
     }
     draft = null;
     go('tab', 'routines'); toast('Rutina guardada');
@@ -453,6 +489,8 @@
       }, `${i + 1}. ${e.name.split(' ')[0]} ${d}/${e.sets.length}`));
     });
     view.append(strip);
+    const routineNotes = state.routines.find((r) => r.id === a.routineId)?.notes;
+    if (routineNotes) view.append(el('p', { class: 'small notes mb' }, '📝 ', routineNotes));
 
     view.append(el('h1', {}, ex.name));
     view.append(el('p', { class: 'muted small' }, `${ex.muscle} · Objetivo: `, el('b', {}, `${entry.targetSets} × ${entry.targetReps}`)));
@@ -798,5 +836,6 @@
   /* ---------- Arranque ---------- */
   if (!state.active) state.ui.screen = 'tab';
   if (state.ui.screen === 'editor') state.ui.screen = 'tab';
+  save();
   render();
 })();

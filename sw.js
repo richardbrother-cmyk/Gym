@@ -1,5 +1,5 @@
 /* Service worker: cache-first app shell + media so the app works offline. */
-const VERSION = 'gym-tracker-v1';
+const VERSION = 'gym-tracker-v2';
 const SHELL = [
   './',
   './index.html',
@@ -15,8 +15,10 @@ const SHELL = [
 const MEDIA = [
   'press-pecho-plano', 'jalon-al-pecho', 'press-pecho-inclinado', 'remo-sentado-al-pecho',
   'press-pecho-declinado', 'peck-deck-invertido', 'jalon-a-la-barbilla', 'espalda-baja',
+  'press-militar-mancuernas-sentado', 'laterales-mancuernas-de-pie', 'posterior-unilateral-polea-alta',
+  'curl-biceps-barra-z', 'extension-polea-alta-barra', 'curl-martillo-unilateral-sentado', 'extension-polea-alta-cuerda',
 ].flatMap((n) => [`./media/${n}.mp4`, `./media/thumbs/${n}.jpg`]).concat(
-  ['peck-deck-cristo', 'pull-over-polea-alta'].flatMap((n) => [`./media/${n}.jpg`, `./media/thumbs/${n}.jpg`])
+  ['peck-deck-cristo', 'pull-over-polea-alta', 'frontal-unilateral-mancuernas', 'predicador', 'extension-trasnuca-polea-cuerda'].flatMap((n) => [`./media/${n}.jpg`, `./media/thumbs/${n}.jpg`])
 );
 
 self.addEventListener('install', (event) => {
