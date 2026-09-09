@@ -4,7 +4,7 @@ App web instalable (PWA) para llevar el seguimiento de rutinas de gimnasio:
 
 - **Rutinas** con nombre, lista de ejercicios, series y repeticiones objetivo.
 - **Animaciones** de cada ejercicio (video en bucle o imagen).
-- **Entrenamiento guiado**: registra repeticiones y peso de cada serie, con temporizador de descanso y referencia de la última sesión.
+- **Entrenamiento guiado**: registra repeticiones y peso de cada serie, con temporizador de descanso, notificación al terminar el descanso (aunque la app esté en segundo plano) y referencia de la última sesión.
 - **Histórico** de sesiones y **progreso** por ejercicio (peso máximo, volumen y récords) en gráficas.
 - Funciona **sin conexión** y se puede **instalar** en el teléfono (Android/Chrome e iOS/Safari).
 - Los datos se guardan en el dispositivo (localStorage). Se pueden **exportar/importar** en JSON desde la pestaña Progreso.

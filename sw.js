@@ -1,5 +1,5 @@
 /* Service worker: cache-first app shell + media so the app works offline. */
-const VERSION = 'gym-tracker-v2';
+const VERSION = 'gym-tracker-v3';
 const SHELL = [
   './',
   './index.html',
@@ -83,3 +83,54 @@ async function rangeFromCache(request) {
     },
   });
 }
+
+/* ---------- Notificación de fin de descanso ----------
+   La página programa el aviso aquí para que llegue aunque esté en segundo plano.
+   waitUntil mantiene vivo el service worker hasta que se muestre. */
+let restTimeout = null;
+let restResolve = null;
+function clearRest() {
+  if (restTimeout) clearTimeout(restTimeout);
+  restTimeout = null;
+  if (restResolve) restResolve();
+  restResolve = null;
+}
+self.addEventListener('message', (event) => {
+  const msg = event.data || {};
+  if (msg.type === 'rest:cancel') { clearRest(); return; }
+  if (msg.type !== 'rest:schedule') return;
+  clearRest();
+  const delay = Math.max(0, (msg.at || 0) - Date.now());
+  event.waitUntil(new Promise((resolve) => {
+    restResolve = resolve;
+    restTimeout = setTimeout(async () => {
+      restTimeout = null;
+      try {
+        await self.registration.showNotification(msg.title || '⏰ Descanso terminado', {
+          body: msg.body || '¡A por la siguiente serie!',
+          icon: './icons/icon-192.png',
+          badge: './icons/icon-192.png',
+          tag: 'rest',
+          renotify: true,
+          vibrate: [200, 100, 200],
+          data: { url: './index.html' },
+        });
+        const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+        clients.forEach((c) => c.postMessage({ type: 'rest:fired' }));
+      } catch (_) { /* sin permiso */ }
+      restResolve = null;
+      resolve();
+    }, delay);
+  }));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      const c = clients.find((x) => 'focus' in x);
+      if (c) return c.focus();
+      return self.clients.openWindow('./index.html');
+    })
+  );
+});

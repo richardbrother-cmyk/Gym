@@ -83,7 +83,7 @@
       customExercises: [],
       sessions: [],
       active: null,
-      settings: { rest: DEFAULT_REST },
+      settings: { rest: DEFAULT_REST, notify: true },
       ui: { tab: 'routines', screen: 'tab', progressEx: null, progressMetric: 'maxWeight' },
     };
     if (!saved) return base;
@@ -536,7 +536,7 @@
         : el('button', { class: 'btn btn-ok', onclick: finishWorkout }, '✔ Finalizar')));
 
     view.append(el('p', { class: 'small muted mt', style: { textAlign: 'center' } },
-      `Descanso entre series: ${state.settings.rest}s · `,
+      `Descanso: ${state.settings.rest}s · Aviso: ${state.settings.notify && notifPermission() === 'granted' ? 'activado' : state.settings.notify ? 'pendiente de permiso' : 'desactivado'} · `,
       el('a', { href: '#', onclick: (e) => { e.preventDefault(); changeRest(); } }, 'cambiar')));
   }
 
@@ -563,8 +563,23 @@
   }
   function changeRest() {
     const input = el('input', { class: 'input num', type: 'number', min: 10, max: 600, step: 5, value: state.settings.rest });
-    const close = openModal(el('div', {}, el('h2', {}, 'Descanso entre series (segundos)'), input,
-      el('button', { class: 'btn btn-accent btn-block mt', onclick: () => { state.settings.rest = clamp(parseInt(input.value, 10) || DEFAULT_REST, 10, 600); save(); close(); render(); } }, 'Guardar')));
+    const perm = notifPermission();
+    const status = perm === 'unsupported' ? 'Este navegador no admite notificaciones. En iPhone, instala la app en la pantalla de inicio (iOS 16.4 o superior).'
+      : perm === 'denied' ? 'Bloqueadas por el navegador. Actívalas en los ajustes del sitio para recibir el aviso.'
+      : perm === 'granted' ? 'Permiso concedido. Recibirás un aviso aunque la pantalla esté apagada.'
+      : 'Se pedirá permiso la primera vez que termine una serie.';
+    const toggle = el('input', { type: 'checkbox', checked: state.settings.notify, style: { width: '22px', height: '22px', accentColor: 'var(--accent)' } });
+    const close = openModal(el('div', {},
+      el('h2', {}, 'Descanso'),
+      el('label', { class: 'field' }, el('span', {}, 'Segundos entre series'), input),
+      el('label', { class: 'row', style: { gap: '.75rem', padding: '.5rem 0' } }, toggle,
+        el('div', { class: 'grow' }, el('div', { style: { fontWeight: 600 } }, 'Notificación al terminar el descanso'), el('div', { class: 'small muted' }, status))),
+      perm === 'default' ? el('button', { class: 'btn btn-block mt', onclick: async () => { askedNotif = false; await ensureNotificationPermission(); close(); changeRest(); } }, '🔔 Permitir notificaciones ahora') : null,
+      el('button', { class: 'btn btn-accent btn-block mt', onclick: () => {
+        state.settings.rest = clamp(parseInt(input.value, 10) || DEFAULT_REST, 10, 600);
+        state.settings.notify = toggle.checked;
+        save(); close(); render();
+      } }, 'Guardar')));
   }
 
   async function finishWorkout() {
@@ -607,20 +622,70 @@
     restNode = el('div', { class: 'rest' },
       el('span', { class: 'muted small' }, 'Descanso'),
       el('span', { class: 't' }, fmtSec(sec)),
-      el('button', { class: 'btn btn-sm', onclick: () => { restEnd += 30000; tick(); } }, '+30s'),
+      el('button', { class: 'btn btn-sm', onclick: () => { restEnd += 30000; scheduleRestNotification(); tick(); } }, '+30s'),
       el('button', { class: 'btn btn-sm btn-ghost', 'aria-label': 'Saltar descanso', onclick: stopRest }, '✕'));
     document.body.append(restNode);
     document.body.classList.add('resting');
     restTimer = setInterval(tick, 250);
+    ensureNotificationPermission().then(scheduleRestNotification);
     tick();
   }
   function tick() {
     if (!restNode) return;
     const left = Math.max(0, Math.ceil((restEnd - Date.now()) / 1000));
     restNode.querySelector('.t').textContent = fmtSec(left);
-    if (left <= 0) { stopRest(); toast('⏰ ¡A por la siguiente serie!'); navigator.vibrate?.([200, 100, 200]); beep(); }
+    if (left <= 0) {
+      stopRest({ keepNotification: true });
+      toast('⏰ ¡A por la siguiente serie!'); navigator.vibrate?.([200, 100, 200]); beep();
+      if (!swReady()) showRestNotificationFromPage();
+    }
   }
-  function stopRest() { clearInterval(restTimer); restTimer = null; restNode?.remove(); restNode = null; document.body.classList.remove('resting'); }
+  function stopRest({ keepNotification = false } = {}) {
+    clearInterval(restTimer); restTimer = null; restNode?.remove(); restNode = null;
+    document.body.classList.remove('resting');
+    if (!keepNotification) cancelRestNotification();
+  }
+  // Si la app vuelve a primer plano, actualiza el contador (los temporizadores se pausan en segundo plano).
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
+
+  /* ---------- Notificaciones al terminar el descanso ---------- */
+  const notifSupported = () => 'Notification' in window;
+  const notifPermission = () => (notifSupported() ? Notification.permission : 'unsupported');
+  const swReady = () => !!navigator.serviceWorker?.controller;
+  let askedNotif = false;
+  async function ensureNotificationPermission() {
+    if (!state.settings.notify || !notifSupported() || askedNotif) return notifPermission() === 'granted';
+    if (Notification.permission === 'default') {
+      askedNotif = true;
+      try { await Notification.requestPermission(); } catch (_) { /* ignorado */ }
+      if (Notification.permission === 'denied') toast('Notificaciones bloqueadas: actívalas en los ajustes del navegador');
+    }
+    return Notification.permission === 'granted';
+  }
+  function restNotificationPayload() {
+    const a = state.active;
+    const e = a?.entries[a.current];
+    const nextSet = e ? e.sets.findIndex((x) => !x.done) + 1 : 0;
+    return {
+      title: '⏰ Descanso terminado',
+      body: e ? (nextSet ? `${e.name} · serie ${nextSet} de ${e.sets.length}` : `${e.name} · ¡ejercicio completado!`) : '¡A por la siguiente serie!',
+    };
+  }
+  function scheduleRestNotification() {
+    if (!state.settings.notify || notifPermission() !== 'granted' || !swReady() || !restNode) return;
+    navigator.serviceWorker.controller.postMessage({ type: 'rest:schedule', at: restEnd, ...restNotificationPayload() });
+  }
+  function cancelRestNotification() {
+    if (swReady()) navigator.serviceWorker.controller.postMessage({ type: 'rest:cancel' });
+  }
+  function showRestNotificationFromPage() {
+    if (!state.settings.notify || notifPermission() !== 'granted') return;
+    const p = restNotificationPayload();
+    try { new Notification(p.title, { body: p.body, icon: 'icons/icon-192.png', tag: 'rest', silent: false }); } catch (_) { /* iOS sin SW */ }
+  }
+  // Al tocar la notificación el SW enfoca la app; aquí solo cerramos el contador si sigue visible.
+  navigator.serviceWorker?.addEventListener('message', (ev) => { if (ev.data?.type === 'rest:fired') tick(); });
+
   const fmtSec = (s) => `${Math.floor(s / 60)}:${pad(s % 60)}`;
   function beep() {
     try {
