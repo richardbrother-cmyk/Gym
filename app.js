@@ -537,7 +537,7 @@
 
     view.append(el('p', { class: 'small muted mt', style: { textAlign: 'center' } },
       `Descanso: ${state.settings.rest}s · Aviso: ${state.settings.notify && notifPermission() === 'granted' ? 'activado' : state.settings.notify ? 'pendiente de permiso' : 'desactivado'} · `,
-      el('a', { href: '#', onclick: (e) => { e.preventDefault(); changeRest(); } }, 'cambiar')));
+      el('a', { href: '#', onclick: (e) => { e.preventDefault(); openSettings(); } }, 'cambiar')));
   }
 
   // Autorrellena los kilos en las series siguientes del mismo ejercicio que no estén hechas ni editadas a mano.
@@ -561,26 +561,55 @@
     }
     save(); render();
   }
-  function changeRest() {
-    const input = el('input', { class: 'input num', type: 'number', min: 10, max: 600, step: 5, value: state.settings.rest });
+  /* ---------- Ajustes (notificaciones y descanso) ---------- */
+  function openSettings() {
     const perm = notifPermission();
-    const status = perm === 'unsupported' ? 'Este navegador no admite notificaciones. En iPhone, instala la app en la pantalla de inicio (iOS 16.4 o superior).'
-      : perm === 'denied' ? 'Bloqueadas por el navegador. Actívalas en los ajustes del sitio para recibir el aviso.'
-      : perm === 'granted' ? 'Permiso concedido. Recibirás un aviso aunque la pantalla esté apagada.'
-      : 'Se pedirá permiso la primera vez que termine una serie.';
-    const toggle = el('input', { type: 'checkbox', checked: state.settings.notify, style: { width: '22px', height: '22px', accentColor: 'var(--accent)' } });
+    const statusText = perm === 'unsupported' ? 'Este navegador no admite notificaciones. En iPhone, instala la app en la pantalla de inicio (iOS 16.4 o superior).'
+      : perm === 'denied' ? 'Bloqueadas por el navegador. Actívalas en los ajustes del sitio (icono del candado o información de la página).'
+      : perm === 'granted' ? 'Permiso concedido. Recibirás el aviso aunque la pantalla esté apagada.'
+      : 'Falta conceder el permiso del navegador.';
+    const statusChip = perm === 'granted' && state.settings.notify ? el('span', { class: 'chip ok' }, 'Activadas')
+      : !state.settings.notify ? el('span', { class: 'chip' }, 'Desactivadas')
+      : el('span', { class: 'chip accent' }, perm === 'denied' ? 'Bloqueadas' : 'Sin permiso');
+
+    const toggle = el('input', { type: 'checkbox', class: 'switch', checked: state.settings.notify, onchange: () => {
+      state.settings.notify = toggle.checked; save();
+      if (toggle.checked && perm === 'default') { askedNotif = false; ensureNotificationPermission().then(reopen); }
+      else reopen();
+    } });
+    const restInput = el('input', { class: 'input num', type: 'number', min: 10, max: 600, step: 5, value: state.settings.rest,
+      onchange: () => { state.settings.rest = clamp(parseInt(restInput.value, 10) || DEFAULT_REST, 10, 600); restInput.value = state.settings.rest; save(); } });
+
     const close = openModal(el('div', {},
-      el('h2', {}, 'Descanso'),
-      el('label', { class: 'field' }, el('span', {}, 'Segundos entre series'), input),
-      el('label', { class: 'row', style: { gap: '.75rem', padding: '.5rem 0' } }, toggle,
-        el('div', { class: 'grow' }, el('div', { style: { fontWeight: 600 } }, 'Notificación al terminar el descanso'), el('div', { class: 'small muted' }, status))),
-      perm === 'default' ? el('button', { class: 'btn btn-block mt', onclick: async () => { askedNotif = false; await ensureNotificationPermission(); close(); changeRest(); } }, '🔔 Permitir notificaciones ahora') : null,
-      el('button', { class: 'btn btn-accent btn-block mt', onclick: () => {
-        state.settings.rest = clamp(parseInt(input.value, 10) || DEFAULT_REST, 10, 600);
-        state.settings.notify = toggle.checked;
-        save(); close(); render();
-      } }, 'Guardar')));
+      el('h2', {}, '⚙️ Ajustes'),
+
+      el('div', { class: 'card mb' },
+        el('div', { class: 'row between' }, el('h3', {}, '🔔 Notificaciones'), statusChip),
+        el('label', { class: 'row', style: { gap: '.75rem', padding: '.6rem 0' } }, toggle,
+          el('div', { class: 'grow' }, el('div', { style: { fontWeight: 600 } }, 'Avisar al terminar el descanso'),
+            el('div', { class: 'small muted' }, 'Notificación del sistema con el ejercicio y la serie que toca.'))),
+        el('p', { class: 'small muted' }, statusText),
+        state.settings.notify && perm === 'default' ? el('button', { class: 'btn btn-block', onclick: async () => { askedNotif = false; await ensureNotificationPermission(); reopen(); } }, '🔔 Permitir notificaciones') : null,
+        state.settings.notify && perm === 'granted' ? el('button', { class: 'btn btn-block btn-sm', onclick: testNotification }, 'Probar notificación') : null),
+
+      el('div', { class: 'card mb' },
+        el('h3', {}, '⏱️ Descanso entre series'),
+        el('label', { class: 'field', style: { marginBottom: 0 } }, el('span', {}, 'Segundos'), restInput),
+        el('p', { class: 'small muted', style: { margin: '.5rem 0 0' } }, 'Además del aviso, la app vibra y suena si está en primer plano.')),
+
+      el('button', { class: 'btn btn-accent btn-block', onclick: () => { close(); render(); } }, 'Listo')));
+    function reopen() { close(); openSettings(); }
   }
+  async function testNotification() {
+    if (notifPermission() !== 'granted') return toast('Primero concede el permiso');
+    const opts = { body: 'Así se verá el aviso al terminar el descanso.', icon: 'icons/icon-192.png', tag: 'rest-test' };
+    try {
+      const reg = await navigator.serviceWorker?.getRegistration();
+      if (reg) await reg.showNotification('⏰ Descanso terminado', opts); else new Notification('⏰ Descanso terminado', opts);
+      toast('Notificación enviada');
+    } catch (_) { toast('No se pudo mostrar la notificación'); }
+  }
+  $('#btn-settings').addEventListener('click', openSettings);
 
   async function finishWorkout() {
     const a = state.active;
