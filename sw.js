@@ -1,5 +1,5 @@
 /* Service worker: cache-first app shell + media so the app works offline. */
-const VERSION = 'gym-tracker-v3';
+const VERSION = 'gym-tracker-v4';
 const SHELL = [
   './',
   './index.html',
@@ -17,6 +17,8 @@ const MEDIA = [
   'press-pecho-declinado', 'peck-deck-invertido', 'jalon-a-la-barbilla', 'espalda-baja',
   'press-militar-mancuernas-sentado', 'laterales-mancuernas-de-pie', 'posterior-unilateral-polea-alta',
   'curl-biceps-barra-z', 'extension-polea-alta-barra', 'curl-martillo-unilateral-sentado', 'extension-polea-alta-cuerda',
+  'extension-cuadriceps', 'femoral-sentado', 'prensa-inclinada', 'sentadilla-libre', 'aductor', 'abductor',
+  'pantorrilla-de-pie-sin-peso', 'pantorrilla-en-prensa',
 ].flatMap((n) => [`./media/${n}.mp4`, `./media/thumbs/${n}.jpg`]).concat(
   ['peck-deck-cristo', 'pull-over-polea-alta', 'frontal-unilateral-mancuernas', 'predicador', 'extension-trasnuca-polea-cuerda'].flatMap((n) => [`./media/${n}.jpg`, `./media/thumbs/${n}.jpg`])
 );

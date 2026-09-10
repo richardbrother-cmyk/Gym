@@ -244,3 +244,4 @@ textarea.input { resize: vertical; min-height: 2.5rem; }
 .switch:checked { background: var(--accent); }
 .switch:checked::after { transform: translateX(20px); }
 .modal .card { background: var(--bg-2); }
+.media-box.placeholder { aspect-ratio: 16 / 5; }

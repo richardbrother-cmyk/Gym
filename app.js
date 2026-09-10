@@ -29,6 +29,16 @@
     { id: 'extension-polea-alta-cuerda',       name: 'Extensión en polea alta con cuerda',        muscle: 'Tríceps',            media: 'video' },
     { id: 'predicador',                        name: 'Predicador',                                muscle: 'Bíceps',             media: 'image' },
     { id: 'extension-trasnuca-polea-cuerda',   name: 'Extensión trasnuca en polea alta con cuerda', muscle: 'Tríceps (cabeza larga)', media: 'image', wide: true },
+    // Pierna
+    { id: 'extension-cuadriceps',          name: 'Extensión de cuádriceps',                 muscle: 'Cuádriceps',           media: 'video' },
+    { id: 'femoral-sentado',               name: 'Femoral sentado',                         muscle: 'Isquiotibiales',       media: 'video' },
+    { id: 'prensa-inclinada',              name: 'Prensa inclinada',                        muscle: 'Cuádriceps / Glúteo',  media: 'video' },
+    { id: 'sentadilla-libre',              name: 'Sentadilla libre',                        muscle: 'Pierna completa',      media: 'video' },
+    { id: 'aductor',                       name: 'Aductor',                                 muscle: 'Aductores',            media: 'video' },
+    { id: 'abductor',                      name: 'Abductor',                                muscle: 'Glúteo medio',         media: 'video' },
+    { id: 'pantorrilla-de-pie-sin-peso',   name: 'Extensión de pantorrilla de pie sin peso', muscle: 'Pantorrilla',         media: 'video' },
+    { id: 'pantorrilla-en-prensa',         name: 'Extensión de pantorrilla en prensa',      muscle: 'Pantorrilla',          media: 'video' },
+    { id: 'extension-tibiales',            name: 'Extensión para tibiales',                 muscle: 'Tibial anterior',      media: null },
   ];
 
   const DEFAULT_ROUTINES = [
@@ -66,6 +76,21 @@
         { exerciseId: 'extension-polea-alta-cuerda', sets: 4, reps: 10 },
         { exerciseId: 'predicador', sets: 4, reps: 10 },
         { exerciseId: 'extension-trasnuca-polea-cuerda', sets: 4, reps: 10 },
+      ],
+    },
+    {
+      id: 'rutina-pierna', name: 'Miércoles y Sábado · Pierna',
+      notes: 'Triserie inicial: cuádriceps, femoral y prensa (una serie de cada, seguidas). Sentadilla libre sola. Aductor alternado con abductor. Triserie final: pantorrilla de pie sin peso, pantorrilla en prensa y tibiales. La de pie puede hacerse completamente recto agarrado de algo.',
+      items: [
+        { exerciseId: 'extension-cuadriceps', sets: 4, reps: 10 },
+        { exerciseId: 'femoral-sentado', sets: 4, reps: 10 },
+        { exerciseId: 'prensa-inclinada', sets: 4, reps: 10 },
+        { exerciseId: 'sentadilla-libre', sets: 4, reps: 10 },
+        { exerciseId: 'aductor', sets: 4, reps: 10 },
+        { exerciseId: 'abductor', sets: 4, reps: 10 },
+        { exerciseId: 'pantorrilla-de-pie-sin-peso', sets: 4, reps: 20 },
+        { exerciseId: 'pantorrilla-en-prensa', sets: 4, reps: 20 },
+        { exerciseId: 'extension-tibiales', sets: 4, reps: 20 },
       ],
     },
   ];
@@ -177,7 +202,7 @@
 
   function mediaNode(ex, { autoplay = true } = {}) {
     if (!ex.media) {
-      return el('div', { class: 'media-box dark' }, el('span', { class: 'muted', style: { fontSize: '3rem' } }, '🏋️'));
+      return el('div', { class: 'media-box dark placeholder' }, el('span', { class: 'muted', style: { fontSize: '2.5rem' } }, '🏋️'));
     }
     if (ex.media === 'image') {
       return el('div', { class: 'media-box' + (ex.wide ? ' wide' : '') }, el('img', { src: `media/${ex.id}.jpg`, alt: ex.name, loading: 'lazy' }));
