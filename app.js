@@ -581,12 +581,16 @@
     entry.sets.forEach((s, i) => {
       const row = el('div', { class: 'set-row' + (s.done ? ' done' : '') });
       const reps = el('input', { class: 'input num', type: 'number', inputmode: 'numeric', min: 0, value: s.reps,
-        onchange: (e) => { s.reps = Math.max(0, parseInt(e.target.value, 10) || 0); e.target.value = s.reps; save(); } });
+        onchange: (e) => {
+          s.reps = Math.max(0, parseInt(e.target.value, 10) || 0); e.target.value = s.reps;
+          s.rTouched = true;
+          if (propagate(entry, i, 'reps')) render(); else save();
+        } });
       const weight = el('input', { class: 'input num', type: 'number', inputmode: 'decimal', min: 0, step: '0.5', value: s.weight,
         onchange: (e) => {
           s.weight = Math.max(0, parseFloat(String(e.target.value).replace(',', '.')) || 0); e.target.value = s.weight;
           s.wTouched = true;
-          if (propagateWeight(entry, i)) render(); else save();
+          if (propagate(entry, i, 'weight')) render(); else save();
         } });
       row.append(
         el('span', { class: 'idx' }, i + 1), reps, weight,
@@ -614,12 +618,13 @@
       el('a', { href: '#', onclick: (e) => { e.preventDefault(); openSettings(); } }, 'cambiar')));
   }
 
-  // Autorrellena los kilos en las series siguientes del mismo ejercicio que no estén hechas ni editadas a mano.
-  function propagateWeight(entry, i) {
-    const w = entry.sets[i].weight;
+  // Autorrellena kilos o repeticiones en las series siguientes del mismo ejercicio que no estén hechas ni editadas a mano.
+  function propagate(entry, i, key) {
+    const v = entry.sets[i][key];
+    const touched = key === 'weight' ? 'wTouched' : 'rTouched';
     let changed = false;
     entry.sets.forEach((n, j) => {
-      if (j > i && !n.done && !n.wTouched && n.weight !== w) { n.weight = w; changed = true; }
+      if (j > i && !n.done && !n[touched] && n[key] !== v) { n[key] = v; changed = true; }
     });
     save();
     return changed;
@@ -628,7 +633,7 @@
   function toggleSet(entry, s, i) {
     s.done = !s.done;
     if (s.done) {
-      propagateWeight(entry, i);
+      propagate(entry, i, 'weight'); propagate(entry, i, 'reps');
       startRest(state.settings.rest);
       const pb = personalBests(entry.exerciseId);
       if (s.weight && s.weight > pb.maxWeight && s.reps > 0) toast('🏆 ¡Nuevo récord de peso!');
