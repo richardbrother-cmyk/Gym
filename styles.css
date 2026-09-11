@@ -245,3 +245,17 @@ textarea.input { resize: vertical; min-height: 2.5rem; }
 .switch:checked::after { transform: translateX(20px); }
 .modal .card { background: var(--bg-2); }
 .media-box.placeholder { aspect-ratio: 16 / 5; }
+
+/* Fichas técnicas y filas de ejercicio pulsables */
+.ex-item-btn { width: 100%; text-align: left; background: none; border: 0; padding: .35rem .4rem; border-radius: 10px; color: inherit; }
+.ex-item-btn:active { background: var(--card-2); }
+.info-desc { margin: 0 0 .4rem; }
+details.info { border: 1px solid var(--line); border-radius: 10px; margin-top: .5rem; background: var(--bg-2); }
+details.info summary { cursor: pointer; padding: .6rem .8rem; font-weight: 600; list-style: none; display: flex; justify-content: space-between; }
+details.info summary::-webkit-details-marker { display: none; }
+details.info summary::after { content: '+'; color: var(--muted); }
+details.info[open] summary::after { content: '−'; }
+.info-list { margin: 0; padding: 0 .9rem .7rem 1.8rem; }
+.info-list li { margin: .25rem 0; line-height: 1.35; }
+.info-list.err li::marker { color: var(--danger); }
+.info-list a { color: var(--accent-2); }

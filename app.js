@@ -309,12 +309,13 @@
             r.notes ? el('div', { class: 'small notes' }, '📝 ', r.notes) : null),
         ),
         el('div', { class: 'ex-list mt' },
-          r.items.map((it) => {
+          r.items.map((it, idx) => {
             const ex = getExercise(it.exerciseId);
-            return el('div', { class: 'ex-item' },
+            return el('button', { class: 'ex-item ex-item-btn', 'aria-label': `Opciones de ${ex.name}`, onclick: () => routineItemActions(r, idx) },
               el('img', { class: 'thumb sm', src: thumbSrc(ex), alt: '', loading: 'lazy' }),
               el('div', { class: 'grow' }, el('div', { class: 'name' }, ex.name), el('div', { class: 'meta' }, ex.muscle)),
-              el('span', { class: 'chip accent' }, `${it.sets}×${it.reps}`));
+              el('span', { class: 'chip accent' }, `${it.sets}×${it.reps}`),
+              el('span', { class: 'muted', 'aria-hidden': 'true' }, '›'));
           })),
         el('div', { class: 'row mt' },
           el('button', { class: 'btn btn-accent grow', onclick: () => startWorkout(r) }, '▶ Iniciar'),
@@ -325,6 +326,52 @@
       ));
     }
     view.append(list);
+  }
+
+  /* Menú al tocar un ejercicio dentro de una rutina */
+  function routineItemActions(r, idx) {
+    const it = r.items[idx];
+    const ex = getExercise(it.exerciseId);
+    const num = (key, min, max) => el('input', {
+      class: 'input num', type: 'number', inputmode: 'numeric', min, max, value: it[key], 'aria-label': key === 'sets' ? 'Series' : 'Repeticiones',
+      onchange: (e) => { it[key] = clamp(parseInt(e.target.value, 10) || min, min, max); e.target.value = it[key]; save(); render(); },
+    });
+    const close = openModal(el('div', {},
+      el('div', { class: 'ex-item mb' },
+        el('img', { class: 'thumb', src: thumbSrc(ex), alt: '' }),
+        el('div', { class: 'grow' }, el('h2', {}, ex.name), el('div', { class: 'small muted' }, `${ex.muscle} · en "${r.name}"`))),
+      el('div', { class: 'mb' },
+        el('div', { class: 'small muted', style: { fontWeight: 600, marginBottom: '.3rem' } }, 'Series × repeticiones'),
+        el('div', { class: 'row', style: { gap: '.5rem' } }, num('sets', 1, 20), el('span', { class: 'muted' }, '×'), num('reps', 1, 200))),
+      el('div', { class: 'stack' },
+        el('button', { class: 'btn btn-accent btn-block', onclick: () => { close(); go('tab', 'exercises'); showExercise(ex); } }, '📖 Ver ficha y técnica'),
+        el('button', { class: 'btn btn-block', onclick: () => { close(); pickExercise((nx) => {
+          it.exerciseId = nx.id; save(); render(); toast(`Cambiado por ${nx.name}`);
+        }); } }, '🔁 Cambiar por otro ejercicio'),
+        el('button', { class: 'btn btn-block', onclick: () => { close(); startEditor(r); } }, '✏️ Editar rutina completa'),
+        el('button', { class: 'btn btn-block btn-danger', onclick: async () => {
+          close();
+          if (!(await confirmDialog('Quitar ejercicio', `¿Quitar "${ex.name}" de la rutina "${r.name}"?`, 'Quitar', true))) return;
+          r.items.splice(idx, 1); save(); render(); toast('Ejercicio quitado de la rutina');
+        } }, '🗑️ Quitar de la rutina'))));
+  }
+
+  /* Ficha técnica (descripción, ejecución, consejos, errores) */
+  function infoSections(ex, { open = false } = {}) {
+    const info = window.EXERCISE_INFO?.[ex.id];
+    if (!info) return el('p', { class: 'small muted mt' }, 'Este ejercicio no tiene ficha técnica todavía.');
+    const list = (items, cls) => el('ul', { class: 'info-list ' + (cls || '') }, items.map((t) => el('li', {}, t)));
+    const section = (title, body, isOpen) => el('details', { class: 'info', open: isOpen }, el('summary', {}, title), body);
+    return el('div', { class: 'info-wrap mt' },
+      el('p', { class: 'info-desc' }, info.descripcion),
+      el('p', { class: 'small' }, el('b', {}, 'Músculos: '), info.musculos.primarios, el('span', { class: 'muted' }, ' · Secundarios: ' + info.musculos.secundarios)),
+      section('🎯 Cómo se hace', el('ol', { class: 'info-list' }, info.pasos.map((t) => el('li', {}, t))), open),
+      section('💡 Consejos', list(info.consejos), open),
+      section('⚠️ Errores comunes', list(info.errores, 'err'), open),
+      section('🔗 Fuentes', el('ul', { class: 'info-list small' }, info.fuentes.map((f) => el('li', {}, el('a', { href: f.u, target: '_blank', rel: 'noopener' }, f.t)))), false));
+  }
+  function showExerciseInfo(ex) {
+    openModal(el('div', {}, el('h2', {}, ex.name), el('p', { class: 'muted small' }, ex.muscle), infoSections(ex, { open: true })));
   }
 
   function duplicateRoutine(r) {
@@ -451,6 +498,7 @@
       mediaNode(ex),
       last ? el('p', { class: 'last-time mt' }, 'Última vez (', fmtDate(last.session.startedAt), '): ', el('b', {}, setsSummary(last.entry))) : el('p', { class: 'muted small mt' }, 'Todavía no lo has registrado.'),
       pb.maxWeight ? el('div', { class: 'small' }, '🏆 Récord: ', el('b', {}, fmtW(pb.maxWeight)), ' · Mejor volumen: ', el('b', {}, fmtW(pb.volume))) : null,
+      infoSections(ex),
       el('div', { class: 'row mt' },
         el('button', { class: 'btn grow', onclick: () => { close(); state.ui.progressEx = ex.id; go('tab', 'progress'); } }, '📈 Ver progreso'),
         isCustom ? el('button', { class: 'btn btn-danger', onclick: async () => {
@@ -520,6 +568,7 @@
     view.append(el('h1', {}, ex.name));
     view.append(el('p', { class: 'muted small' }, `${ex.muscle} · Objetivo: `, el('b', {}, `${entry.targetSets} × ${entry.targetReps}`)));
     view.append(mediaNode(ex));
+    if (window.EXERCISE_INFO?.[ex.id]) view.append(el('button', { class: 'btn btn-block btn-sm mt', onclick: () => showExerciseInfo(ex) }, '📖 Técnica y consejos'));
 
     const last = lastEntryFor(entry.exerciseId);
     const pb = personalBests(entry.exerciseId);
