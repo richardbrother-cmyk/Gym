@@ -519,20 +519,58 @@
     }
     state.active = {
       id: uid(), routineId: r.id, routineName: r.name, startedAt: new Date().toISOString(), current: 0,
-      entries: r.items.map((it) => {
-        const last = lastEntryFor(it.exerciseId);
-        const lastSets = last ? last.entry.sets.filter((s) => s.done) : [];
-        return {
-          exerciseId: it.exerciseId, name: getExercise(it.exerciseId).name, targetSets: it.sets, targetReps: it.reps,
-          sets: Array.from({ length: it.sets }, (_, i) => ({
-            reps: it.reps,
-            weight: lastSets[i]?.weight ?? lastSets[lastSets.length - 1]?.weight ?? 0,
-            done: false,
-          })),
-        };
-      }),
+      entries: r.items.map((it) => makeEntry(it.exerciseId, it.sets, it.reps)),
     };
     go('workout');
+  }
+  // Crea la entrada de un ejercicio para el entrenamiento, con los kilos de la última sesión precargados.
+  function makeEntry(exerciseId, sets, reps) {
+    const last = lastEntryFor(exerciseId);
+    const lastSets = last ? last.entry.sets.filter((s) => s.done) : [];
+    return {
+      exerciseId, name: getExercise(exerciseId).name, targetSets: sets, targetReps: reps,
+      sets: Array.from({ length: sets }, (_, i) => ({
+        reps,
+        weight: lastSets[i]?.weight ?? lastSets[lastSets.length - 1]?.weight ?? 0,
+        done: false,
+      })),
+    };
+  }
+
+  /* Opciones del ejercicio actual durante el entrenamiento: reemplazar o quitar */
+  function workoutItemActions(a, idx) {
+    const entry = a.entries[idx];
+    const ex = getExercise(entry.exerciseId);
+    const routine = state.routines.find((r) => r.id === a.routineId);
+    // Posición equivalente en la rutina guardada: la n-ésima aparición del mismo ejercicio.
+    const nth = a.entries.slice(0, idx).filter((e) => e.exerciseId === entry.exerciseId).length;
+    let routineIdx = -1;
+    if (routine) { let seen = 0; routineIdx = routine.items.findIndex((it) => it.exerciseId === entry.exerciseId && seen++ === nth); }
+    const alsoRoutine = el('input', { type: 'checkbox', class: 'switch' });
+    const done = entry.sets.filter((s) => s.done).length;
+    const close = openModal(el('div', {},
+      el('div', { class: 'ex-item mb' },
+        el('img', { class: 'thumb', src: thumbSrc(ex), alt: '' }),
+        el('div', { class: 'grow' }, el('h2', {}, ex.name), el('div', { class: 'small muted' }, `Ejercicio ${idx + 1} de ${a.entries.length} · ${done} series hechas`))),
+      routine && routineIdx >= 0 ? el('label', { class: 'row mb', style: { gap: '.75rem' } }, alsoRoutine,
+        el('div', { class: 'grow' }, el('div', { style: { fontWeight: 600 } }, 'Guardar también el cambio en la rutina'), el('div', { class: 'small muted' }, `Se aplicará a "${routine.name}" para las próximas veces.`))) : null,
+      el('div', { class: 'stack' },
+        el('button', { class: 'btn btn-accent btn-block', onclick: () => { close(); pickExercise((nx) => {
+          a.entries[idx] = makeEntry(nx.id, entry.targetSets || entry.sets.length, entry.targetReps || entry.sets[0]?.reps || 10);
+          if (alsoRoutine.checked && routine && routineIdx >= 0) routine.items[routineIdx].exerciseId = nx.id;
+          save(); render(); toast(`Reemplazado por ${nx.name}`);
+        }); } }, '🔁 Reemplazar por otro ejercicio'),
+        el('button', { class: 'btn btn-block', onclick: () => { close(); showExerciseInfo(ex); } }, '📖 Técnica y consejos'),
+        el('button', { class: 'btn btn-block btn-danger', disabled: a.entries.length <= 1, onclick: async () => {
+          close();
+          const msg = done ? `Tiene ${done} series hechas que se perderán. ¿Quitar "${ex.name}" de este entrenamiento?` : `¿Quitar "${ex.name}" de este entrenamiento?`;
+          if (!(await confirmDialog('Quitar ejercicio', msg, 'Quitar', true))) return;
+          a.entries.splice(idx, 1);
+          a.current = clamp(a.current, 0, a.entries.length - 1);
+          if (alsoRoutine.checked && routine && routineIdx >= 0) routine.items.splice(routineIdx, 1);
+          save(); render(); toast('Ejercicio quitado del entrenamiento');
+        } }, '🗑️ Quitar de este entrenamiento'),
+        a.entries.length <= 1 ? el('p', { class: 'small muted', style: { textAlign: 'center' } }, 'No se puede quitar el único ejercicio; usa "Salir" para descartar el entrenamiento.') : null)));
   }
 
   function renderWorkout() {
@@ -565,7 +603,9 @@
     const routineNotes = state.routines.find((r) => r.id === a.routineId)?.notes;
     if (routineNotes) view.append(el('p', { class: 'small notes mb' }, '📝 ', routineNotes));
 
-    view.append(el('h1', {}, ex.name));
+    view.append(el('div', { class: 'row between', style: { alignItems: 'flex-start' } },
+      el('h1', { class: 'grow' }, ex.name),
+      el('button', { class: 'btn btn-icon', title: 'Opciones del ejercicio', 'aria-label': 'Opciones del ejercicio', onclick: () => workoutItemActions(a, a.current) }, '⋯')));
     view.append(el('p', { class: 'muted small' }, `${ex.muscle} · Objetivo: `, el('b', {}, `${entry.targetSets} × ${entry.targetReps}`)));
     view.append(mediaNode(ex));
     if (window.EXERCISE_INFO?.[ex.id]) view.append(el('button', { class: 'btn btn-block btn-sm mt', onclick: () => showExerciseInfo(ex) }, '📖 Técnica y consejos'));
@@ -603,7 +643,7 @@
       entry.sets.length > 1 ? el('button', { class: 'btn btn-sm btn-ghost', onclick: () => { entry.sets.pop(); save(); render(); } }, '− Serie') : null,
       el('span', { class: 'grow' }),
       el('button', { class: 'btn btn-sm btn-ghost', onclick: () => { pickExercise((x) => {
-        a.entries.splice(a.current + 1, 0, { exerciseId: x.id, name: x.name, targetSets: 4, targetReps: 10, sets: Array.from({ length: 4 }, () => ({ reps: 10, weight: 0, done: false })) });
+        a.entries.splice(a.current + 1, 0, makeEntry(x.id, 4, 10));
         save(); render();
       }); } }, '+ Ejercicio extra')));
 
