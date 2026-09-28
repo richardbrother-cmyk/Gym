@@ -1,5 +1,5 @@
 /* Service worker: cache-first app shell + media so the app works offline. */
-const VERSION = 'gym-tracker-v5';
+const VERSION = 'gym-tracker-v6';
 const SHELL = [
   './',
   './index.html',
