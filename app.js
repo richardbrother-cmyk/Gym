@@ -198,7 +198,8 @@
     const m = Math.max(0, Math.round((new Date(b) - new Date(a)) / 60000));
     return m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`;
   };
-  const fmtW = (w) => (w % 1 === 0 ? String(w) : w.toFixed(1)) + ' kg';
+  const fmtNum = (w) => (w % 1 === 0 ? String(w) : w.toFixed(1));
+  const fmtW = (w) => fmtNum(w) + ' kg';
 
   function mediaNode(ex, { autoplay = true } = {}) {
     if (!ex.media) {
@@ -616,10 +617,20 @@
       last ? ['Última vez (', fmtDate(last.session.startedAt), '): ', el('b', {}, setsSummary(last.entry))] : 'Primera vez con este ejercicio. ¡Registra tu base!',
       pb.maxWeight ? [' · Récord: ', el('b', {}, fmtW(pb.maxWeight))] : null));
 
-    const table = el('div', { class: 'set-table' },
-      el('div', { class: 'set-head' }, el('span', {}, 'Serie'), el('span', {}, 'Reps'), el('span', {}, 'Peso (kg)'), el('span', {}, '✓')));
+    // Series de la última sesión (solo las hechas), para mostrarlas como referencia por serie.
+    const prevSets = last ? last.entry.sets.filter((x) => x.done) : [];
+    const hasPrev = prevSets.length > 0;
+    const table = el('div', { class: 'set-table' + (hasPrev ? ' with-prev' : '') },
+      el('div', { class: 'set-head' }, el('span', {}, 'Serie'), hasPrev ? el('span', {}, 'Anterior') : null, el('span', {}, 'Reps'), el('span', {}, 'Peso (kg)'), el('span', {}, '✓')));
     entry.sets.forEach((s, i) => {
       const row = el('div', { class: 'set-row' + (s.done ? ' done' : '') });
+      const p = prevSets[i];
+      const prevCell = hasPrev ? el('button', {
+        class: 'prev' + (p ? '' : ' empty'), type: 'button',
+        title: p ? 'Usar los valores de la última vez' : 'Sin dato de la última vez',
+        'aria-label': p ? `Última vez: ${p.reps} repeticiones con ${p.weight || 0} kg. Tocar para usar` : 'Sin dato de la última vez',
+        onclick: p ? () => { if (s.done) return; s.reps = p.reps; s.weight = p.weight || 0; s.rTouched = true; s.wTouched = true; save(); render(); } : null,
+      }, p ? [el('b', {}, fmtNum(p.weight || 0)), el('span', { class: 'u' }, ' kg'), el('br'), el('span', { class: 'r' }, `${p.reps} reps`)] : '—') : null;
       const reps = el('input', { class: 'input num', type: 'number', inputmode: 'numeric', min: 0, value: s.reps,
         onchange: (e) => {
           s.reps = Math.max(0, parseInt(e.target.value, 10) || 0); e.target.value = s.reps;
@@ -633,7 +644,7 @@
           if (propagate(entry, i, 'weight')) render(); else save();
         } });
       row.append(
-        el('span', { class: 'idx' }, i + 1), reps, weight,
+        el('span', { class: 'idx' }, i + 1), ...(prevCell ? [prevCell] : []), reps, weight,
         el('button', { class: 'done-btn', 'aria-label': s.done ? 'Desmarcar serie' : 'Marcar serie hecha', onclick: () => toggleSet(entry, s, i) }, s.done ? '✓' : '○'));
       table.append(row);
     });

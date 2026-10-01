@@ -259,3 +259,14 @@ details.info[open] summary::after { content: '−'; }
 .info-list li { margin: .25rem 0; line-height: 1.35; }
 .info-list.err li::marker { color: var(--danger); }
 .info-list a { color: var(--accent-2); }
+
+/* Columna "Anterior" en la tabla de series (kilos y reps de la última sesión) */
+.set-table.with-prev .set-row, .set-table.with-prev .set-head { grid-template-columns: 32px 64px 1fr 1fr 44px; gap: .4rem; }
+.set-row .prev {
+  background: transparent; border: 1px dashed var(--line); border-radius: 10px; color: var(--muted);
+  font-size: .72rem; line-height: 1.15; padding: .3rem .2rem; text-align: center; min-height: 44px;
+}
+.set-row .prev b { color: var(--accent-2); font-size: .85rem; }
+.set-row .prev .u { font-size: .65rem; }
+.set-row .prev.empty { border-style: dotted; opacity: .5; }
+.set-row .prev:not(.empty):active { background: var(--card-2); }
