@@ -601,6 +601,13 @@
       }, `${i + 1}. ${e.name.split(' ')[0]} ${d}/${e.sets.length}`));
     });
     view.append(strip);
+    // Mantener visible el ejercicio seleccionado: la barra se redibuja en cada render y perdía el desplazamiento.
+    requestAnimationFrame(() => {
+      const chip = strip.children[a.current];
+      if (!chip) return;
+      const target = chip.offsetLeft - (strip.clientWidth - chip.offsetWidth) / 2;
+      strip.scrollLeft = Math.max(0, target);
+    });
     const routineNotes = state.routines.find((r) => r.id === a.routineId)?.notes;
     if (routineNotes) view.append(el('p', { class: 'small notes mb' }, '📝 ', routineNotes));
 
