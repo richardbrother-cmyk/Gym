@@ -122,9 +122,87 @@
       ui: { ...base.ui, ...(saved.ui || {}), screen: saved.active ? (saved.ui?.screen || 'tab') : 'tab' },
     };
   }
+  let restoring = false; // mientras se restaura la copia espejo no se debe guardar nada
   function save() {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+    if (restoring) return;
+    const json = JSON.stringify(state);
+    try { localStorage.setItem(STORAGE_KEY, json); }
     catch (e) { toast('No se pudo guardar (almacenamiento lleno)'); }
+    idbPut(json);
+  }
+
+  /* ---------- Copia espejo en IndexedDB ----------
+     Segunda copia de los datos. Si localStorage aparece vacío (purga del navegador, limpieza
+     de caché) pero IndexedDB conserva la copia, se restaura automáticamente al arrancar. */
+  const IDB_NAME = 'gymtracker', IDB_STORE = 'kv';
+  function idbOpen() {
+    return new Promise((resolve, reject) => {
+      if (!('indexedDB' in window)) return reject(new Error('sin IndexedDB'));
+      const req = indexedDB.open(IDB_NAME, 1);
+      req.onupgradeneeded = () => req.result.createObjectStore(IDB_STORE);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  let idbWriteTimer = null, idbPending = null;
+  function idbPut(json) {
+    idbPending = json;
+    clearTimeout(idbWriteTimer);
+    idbWriteTimer = setTimeout(async () => {
+      const data = idbPending; idbPending = null;
+      try {
+        const db = await idbOpen();
+        const tx = db.transaction(IDB_STORE, 'readwrite');
+        tx.objectStore(IDB_STORE).put(data, 'state');
+        tx.objectStore(IDB_STORE).put(new Date().toISOString(), 'savedAt');
+        tx.oncomplete = () => db.close();
+      } catch (_) { /* sin IndexedDB */ }
+    }, 300);
+  }
+  function idbGet(key) {
+    return idbOpen().then((db) => new Promise((resolve) => {
+      const req = db.transaction(IDB_STORE).objectStore(IDB_STORE).get(key);
+      req.onsuccess = () => { resolve(req.result ?? null); db.close(); };
+      req.onerror = () => { resolve(null); db.close(); };
+    })).catch(() => null);
+  }
+  // Si localStorage no tiene datos reales pero IndexedDB sí, restaura y recarga.
+  async function restoreFromMirrorIfNeeded() {
+    const hasLocal = state.sessions.length > 0 || state.customExercises.length > 0;
+    if (hasLocal) return;
+    const json = await idbGet('state');
+    if (!json) return;
+    try {
+      const mirror = JSON.parse(json);
+      if (!Array.isArray(mirror.sessions) || !mirror.sessions.length) return;
+      restoring = true;
+      clearTimeout(idbWriteTimer); idbPending = null;
+      localStorage.setItem(STORAGE_KEY, json);
+      toast('Datos restaurados desde la copia de seguridad interna');
+      setTimeout(() => location.reload(), 1200);
+    } catch (_) { /* copia dañada */ }
+  }
+  function idbDelete() {
+    return new Promise((resolve) => {
+      try { const q = indexedDB.deleteDatabase(IDB_NAME); q.onsuccess = q.onerror = q.onblocked = () => resolve(); }
+      catch (_) { resolve(); }
+    });
+  }
+
+  /* ---------- Almacenamiento persistente ----------
+     Pide al navegador que no borre los datos del sitio por falta de espacio. */
+  async function requestPersistentStorage() {
+    try {
+      if (!navigator.storage?.persist) return null;
+      if (await navigator.storage.persisted()) return true;
+      return await navigator.storage.persist();
+    } catch (_) { return null; }
+  }
+  async function storageStatus() {
+    let persisted = null, usage = null;
+    try { persisted = navigator.storage?.persisted ? await navigator.storage.persisted() : null; } catch (_) { /* no */ }
+    try { const e = await navigator.storage?.estimate?.(); if (e) usage = e.usage; } catch (_) { /* no */ }
+    return { persisted, usage, standalone: isStandalone, ios: isIOS };
   }
 
   const allExercises = () => LIBRARY.concat(state.customExercises);
@@ -734,8 +812,31 @@
         el('label', { class: 'field', style: { marginBottom: 0 } }, el('span', {}, 'Segundos'), restInput),
         el('p', { class: 'small muted', style: { margin: '.5rem 0 0' } }, 'Además del aviso, la app vibra y suena si está en primer plano.')),
 
+      storageCard(),
+
       el('button', { class: 'btn btn-accent btn-block', onclick: () => { close(); render(); } }, 'Listo')));
     function reopen() { close(); openSettings(); }
+  }
+  function storageCard() {
+    const status = el('div', { class: 'small muted' }, 'Comprobando…');
+    const d = daysSince(state.settings.lastExportAt);
+    const card = el('div', { class: 'card mb' },
+      el('h3', {}, '💾 Tus datos'),
+      status,
+      el('p', { class: 'small muted', style: { margin: '.5rem 0' } }, `${state.sessions.length} sesiones guardadas · ` + (d === null ? 'sin copia de seguridad' : `última copia hace ${d} días`)),
+      el('div', { class: 'row wrap' },
+        el('button', { class: 'btn btn-sm btn-accent', onclick: exportData }, '⬇️ Guardar copia'),
+        el('button', { class: 'btn btn-sm', onclick: importData }, '⬆️ Restaurar copia')));
+    storageStatus().then((st) => {
+      status.replaceChildren();
+      const line = (ok, text) => status.append(el('div', { style: { color: ok ? 'var(--ok)' : 'var(--accent-2)', marginBottom: '.2rem' } }, (ok ? '✅ ' : '⚠️ ') + text));
+      if (st.ios && !st.standalone) line(false, 'En iPhone, Safari borra los datos de las webs tras 7 días sin usarlas. Instala la app en la pantalla de inicio (Compartir → Añadir a pantalla de inicio) para evitarlo.');
+      else line(st.standalone, st.standalone ? 'App instalada: los datos no se borran por inactividad.' : 'Abre la app instalada (no desde el navegador) para que los datos duren más.');
+      if (st.persisted === true) line(true, 'Almacenamiento persistente concedido: el navegador no borrará los datos por falta de espacio.');
+      else if (st.persisted === false) line(false, 'El navegador aún puede borrar los datos si falta espacio. Usa la app con frecuencia y guarda copias.');
+      status.append(el('div', { style: { marginTop: '.3rem' } }, 'Además, la app guarda una copia interna que se restaura sola si el navegador vacía el almacenamiento principal. Aun así, la única copia a prueba de todo es la que guardas fuera del teléfono.'));
+    });
+    return card;
   }
   async function testNotification() {
     if (notifPermission() !== 'granted') return toast('Primero concede el permiso');
@@ -867,6 +968,7 @@
   function renderHistory() {
     view.append(el('div', { class: 'section-head' }, el('h1', {}, 'Historial'),
       el('span', { class: 'chip' }, `${state.sessions.length} sesiones`)));
+    const bb = backupBanner(); if (bb) view.append(bb);
     if (!state.sessions.length) {
       view.append(el('div', { class: 'empty' }, el('div', { class: 'big' }, '🗓️'), 'Todavía no hay entrenamientos guardados. Inicia una rutina para empezar.'));
       return;
@@ -995,20 +1097,47 @@
   function dataTools() {
     return el('div', { class: 'card mt' },
       el('h3', {}, 'Tus datos'),
-      el('p', { class: 'small muted' }, 'Todo se guarda en este dispositivo. Exporta una copia para no perder el progreso o para pasarlo a otro teléfono.'),
+      el('p', { class: 'small muted' }, 'Todo se guarda en este dispositivo. Exporta una copia para no perder el progreso o para pasarlo a otro teléfono.',
+        state.settings.lastExportAt ? ` Última copia: hace ${daysSince(state.settings.lastExportAt)} días.` : ' Todavía no has guardado ninguna copia.'),
       el('div', { class: 'row wrap' },
         el('button', { class: 'btn btn-sm', onclick: exportData }, '⬇️ Exportar JSON'),
         el('button', { class: 'btn btn-sm', onclick: importData }, '⬆️ Importar JSON'),
         el('button', { class: 'btn btn-sm btn-danger', onclick: async () => {
           if (!(await confirmDialog('Borrar todo', 'Se eliminarán rutinas, historial y ejercicios personalizados. Las rutinas de ejemplo se restaurarán.', 'Borrar todo', true))) return;
-          localStorage.removeItem(STORAGE_KEY); location.reload();
+          restoring = true; clearTimeout(idbWriteTimer); idbPending = null;
+          localStorage.removeItem(STORAGE_KEY); await idbDelete(); location.reload();
         } }, '🧹 Reiniciar')));
   }
-  function exportData() {
-    const blob = new Blob([JSON.stringify({ routines: state.routines, customExercises: state.customExercises, sessions: state.sessions, settings: state.settings, exportedAt: new Date().toISOString() }, null, 2)], { type: 'application/json' });
-    const a = el('a', { href: URL.createObjectURL(blob), download: `gym-tracker-${new Date().toISOString().slice(0, 10)}.json` });
+  async function exportData() {
+    const now = new Date();
+    const name = `gym-tracker-${now.toISOString().slice(0, 10)}.json`;
+    const json = JSON.stringify({ routines: state.routines, customExercises: state.customExercises, sessions: state.sessions, settings: state.settings, exportedAt: now.toISOString() }, null, 2);
+    const markDone = () => { state.settings.lastExportAt = now.toISOString(); save(); toast('Copia guardada'); render(); };
+    // En el móvil, la hoja de compartir permite guardar en Archivos, Drive, WhatsApp, etc.
+    try {
+      const file = new File([json], name, { type: 'application/json' });
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: 'Copia de Gym Tracker' });
+        markDone(); return;
+      }
+    } catch (e) { if (e?.name === 'AbortError') return; }
+    const blob = new Blob([json], { type: 'application/json' });
+    const a = el('a', { href: URL.createObjectURL(blob), download: name });
     document.body.append(a); a.click(); a.remove();
-    toast('Copia exportada');
+    markDone();
+  }
+  const daysSince = (iso) => (iso ? Math.floor((Date.now() - new Date(iso)) / 864e5) : null);
+  // Aviso cuando hay sesiones y la última copia tiene más de 7 días (o nunca se hizo).
+  function backupBanner() {
+    if (!state.sessions.length) return null;
+    const d = daysSince(state.settings.lastExportAt);
+    if (d !== null && d < 7) return null;
+    return el('div', { class: 'card mb', style: { borderColor: 'var(--accent)' } },
+      el('div', { class: 'row between' },
+        el('div', { class: 'grow' },
+          el('div', { style: { fontWeight: 700 } }, '💾 Haz una copia de seguridad'),
+          el('div', { class: 'small muted' }, d === null ? 'Nunca has guardado una copia de tu progreso.' : `Tu última copia tiene ${d} días.`)),
+        el('button', { class: 'btn btn-accent btn-sm', onclick: exportData }, 'Guardar copia')));
   }
   function importData() {
     const input = el('input', { type: 'file', accept: 'application/json,.json' });
@@ -1081,6 +1210,6 @@
   /* ---------- Arranque ---------- */
   if (!state.active) state.ui.screen = 'tab';
   if (state.ui.screen === 'editor') state.ui.screen = 'tab';
-  save();
+  restoreFromMirrorIfNeeded().finally(() => { if (!restoring) save(); requestPersistentStorage(); });
   render();
 })();
