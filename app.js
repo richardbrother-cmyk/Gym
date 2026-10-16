@@ -329,12 +329,33 @@
 
   /* ---------- Render principal ---------- */
   const view = $('#view');
+  // Clave de la vista actual: si no cambia entre renders (p. ej. al marcar una serie), se conserva el scroll.
+  let lastViewKey = null;
+  function viewKey() {
+    return state.ui.screen === 'workout' && state.active ? `workout:${state.active.id}:${state.active.current}` : `${state.ui.screen}:${state.ui.tab}`;
+  }
   function render() {
+    const key = viewKey();
+    const keep = key === lastViewKey;
+    const y = window.scrollY;
+    lastViewKey = key;
     stopMedia();
+    // Mantener la altura mientras se vacía el contenido evita que el navegador salte arriba.
+    if (keep) view.style.minHeight = view.offsetHeight + 'px';
     view.replaceChildren();
-    view.scrollTop = 0;
     document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', state.ui.screen === 'tab' && t.dataset.tab === state.ui.tab));
-
+    try { renderScreen(); }
+    finally {
+      if (keep) {
+        window.scrollTo(0, y);
+        requestAnimationFrame(() => { window.scrollTo(0, y); view.style.minHeight = ''; });
+      } else {
+        view.style.minHeight = '';
+        window.scrollTo(0, 0);
+      }
+    }
+  }
+  function renderScreen() {
     if (state.ui.screen === 'workout' && state.active) return renderWorkout();
     if (state.ui.screen === 'editor') return renderEditor();
     state.ui.screen = 'tab';
