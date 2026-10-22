@@ -1,0 +1,20 @@
+# Worker de respaldo en la nube para Gym Tracker.
+# Despliegue: npx wrangler deploy   (o pegando src/index.js en el panel de Cloudflare)
+name = "gym-sync"
+main = "src/index.js"
+compatibility_date = "2026-01-01"
+
+# Espacio KV donde se guardan las copias. Crea el namespace y pega aquí su id:
+#   npx wrangler kv namespace create GYM_KV
+[[kv_namespaces]]
+binding = "GYM_KV"
+id = "PEGA_AQUI_EL_ID_DEL_NAMESPACE"
+
+# Ruta en el mismo dominio de la app: así la app llama a /api/backup sin configurar nada.
+[[routes]]
+pattern = "gym.consultoriaconfia.com/api/*"
+zone_name = "consultoriaconfia.com"
+
+[vars]
+# Orígenes permitidos para llamadas desde otro dominio (separados por coma). Opcional.
+ALLOWED_ORIGINS = "https://gym.consultoriaconfia.com,http://localhost:8080,http://127.0.0.1:8080"

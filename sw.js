@@ -1,5 +1,5 @@
 /* Service worker: cache-first app shell + media so the app works offline. */
-const VERSION = 'gym-tracker-v7';
+const VERSION = 'gym-tracker-v8';
 const SHELL = [
   './',
   './index.html',
@@ -37,7 +37,7 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k.startsWith('gym-tracker-') && k !== VERSION).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
@@ -47,6 +47,7 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
+  if (url.pathname.includes('/api/')) return; // la sincronización en la nube va siempre a la red
 
   // Range requests (video seeking) are answered from the cache manually.
   if (request.headers.has('range')) {

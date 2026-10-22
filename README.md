@@ -8,6 +8,7 @@ App web instalable (PWA) para llevar el seguimiento de rutinas de gimnasio:
 - **Animaciones** de cada ejercicio (video en bucle o imagen) y **fichas técnicas** con descripción, músculos, ejecución paso a paso, consejos, errores comunes y fuentes (`exercise-info.js`).
 - **Entrenamiento guiado**: registra repeticiones y peso de cada serie, con temporizador de descanso, notificación al terminar el descanso (aunque la app esté en segundo plano) y referencia de la última sesión.
 - **Histórico** de sesiones y **progreso** por ejercicio (peso máximo, volumen y récords) en gráficas.
+- **Copia en la nube** opcional (Cloudflare Worker + KV, carpeta `worker/`): con una frase secreta, cada cambio se sube solo y se restaura al abrir la app en un teléfono vacío; también sincroniza entre dispositivos.
 - Funciona **sin conexión** y se puede **instalar** en el teléfono (Android/Chrome e iOS/Safari).
 - Los datos se guardan en el dispositivo (localStorage, con copia espejo en IndexedDB que se restaura sola si el navegador vacía el almacenamiento). La app pide almacenamiento persistente, avisa cuando la última copia tiene más de 7 días y permite **exportar/importar** en JSON desde Ajustes o Progreso (en el móvil usa la hoja de compartir).
 
@@ -54,5 +55,6 @@ styles.css            Estilos
 sw.js                 Service worker (caché offline)
 manifest.webmanifest  Manifest PWA
 media/                Videos e imágenes de los ejercicios (+ miniaturas en thumbs/)
+worker/               Worker de Cloudflare para la copia en la nube (ver worker/README.md)
 icons/                Íconos de la app
 ```

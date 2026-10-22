@@ -108,7 +108,7 @@
       customExercises: [],
       sessions: [],
       active: null,
-      settings: { rest: DEFAULT_REST, notify: true },
+      settings: { rest: DEFAULT_REST, notify: true, sync: { key: null, url: '', lastSyncAt: null, lastError: null } },
       ui: { tab: 'routines', screen: 'tab', progressEx: null, progressMetric: 'maxWeight' },
     };
     if (!saved) return base;
@@ -118,7 +118,7 @@
     for (const r of DEFAULT_ROUTINES) if (!seeded.has(r.id)) { routines.push(cloneRoutine(r)); seeded.add(r.id); }
     return {
       ...base, ...saved, routines, seeded: [...seeded],
-      settings: { ...base.settings, ...(saved.settings || {}) },
+      settings: { ...base.settings, ...(saved.settings || {}), sync: { ...base.settings.sync, ...(saved.settings?.sync || {}) } },
       ui: { ...base.ui, ...(saved.ui || {}), screen: saved.active ? (saved.ui?.screen || 'tab') : 'tab' },
     };
   }
@@ -129,7 +129,128 @@
     try { localStorage.setItem(STORAGE_KEY, json); }
     catch (e) { toast('No se pudo guardar (almacenamiento lleno)'); }
     idbPut(json);
+    scheduleCloudPush();
   }
+
+  /* ---------- Copia en la nube (Worker de Cloudflare + KV) ----------
+     La frase del usuario se convierte en SHA-256 en el teléfono; solo ese hash viaja al Worker.
+     Tras cada cambio se sube la copia (con retraso de unos segundos); al arrancar se descarga
+     y se combina con lo local. */
+  const SYNC_DEFAULT_URL = 'api/backup';
+  const syncCfg = () => state.settings.sync;
+  const syncEnabled = () => !!syncCfg().key;
+  const syncUrl = () => (syncCfg().url || SYNC_DEFAULT_URL);
+  async function sha256Hex(text) {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+    return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  }
+  const normalizePhrase = (p) => p.normalize('NFKC').trim().toLowerCase().replace(/\s+/g, ' ');
+  const syncKeyFromPhrase = (phrase) => sha256Hex('gym-tracker:' + normalizePhrase(phrase));
+  const cloudPayload = () => ({ routines: state.routines, customExercises: state.customExercises, sessions: state.sessions, settings: { rest: state.settings.rest, notify: state.settings.notify }, seeded: state.seeded });
+
+  async function cloudRequest(method, body) {
+    const res = await fetch(syncUrl(), {
+      method, cache: 'no-store',
+      headers: { 'X-Sync-Key': syncCfg().key, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!res.ok) throw new Error(res.status === 401 ? 'Código no aceptado por el servidor' : res.status === 404 ? 'Servidor de copias no encontrado' : `Error ${res.status} del servidor`);
+    const data = await res.json();
+    return method === 'GET' && data?.exists === false ? null : data;
+  }
+
+  let cloudPushTimer = null, cloudBusy = false, cloudDirty = false;
+  function scheduleCloudPush() {
+    if (!syncEnabled() || restoring) return;
+    cloudDirty = true;
+    clearTimeout(cloudPushTimer);
+    cloudPushTimer = setTimeout(() => cloudPush(), 4000);
+  }
+  async function cloudPush() {
+    if (!syncEnabled() || cloudBusy) return false;
+    if (!navigator.onLine) { cloudDirty = true; return false; }
+    cloudBusy = true;
+    try {
+      // Antes de escribir, combinar con lo que haya en la nube (otro dispositivo pudo añadir sesiones).
+      const remote = await cloudRequest('GET');
+      if (remote) {
+        const r = mergeCloud(remote);
+        if (r.added) { persistQuiet(); idbPut(JSON.stringify(state)); if (state.ui.screen === 'tab') render(); }
+      }
+      const savedAt = new Date().toISOString();
+      await cloudRequest('PUT', { data: cloudPayload(), savedAt });
+      cloudDirty = false;
+      syncCfg().lastSyncAt = savedAt; syncCfg().lastError = null;
+      persistQuiet();
+      return true;
+    } catch (e) {
+      cloudDirty = true;
+      syncCfg().lastError = e.message || 'No se pudo subir la copia';
+      persistQuiet();
+      return false;
+    } finally { cloudBusy = false; }
+  }
+  // Guarda sin volver a programar una subida (para actualizar el estado de la sincronización).
+  function persistQuiet() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (_) { /* lleno */ }
+  }
+  // Combina la copia de la nube con lo local: sesiones y ejercicios por unión; rutinas locales mandan.
+  function mergeCloud(remote) {
+    const d = remote?.data || {};
+    const localEmpty = !state.sessions.length && !state.customExercises.length;
+    if (localEmpty) {
+      state.sessions = Array.isArray(d.sessions) ? d.sessions : [];
+      state.routines = Array.isArray(d.routines) && d.routines.length ? d.routines : state.routines;
+      state.customExercises = Array.isArray(d.customExercises) ? d.customExercises : [];
+      if (Array.isArray(d.seeded)) state.seeded = [...new Set([...(state.seeded || []), ...d.seeded])];
+      if (d.settings) state.settings = { ...state.settings, ...d.settings, sync: state.settings.sync };
+      return { restored: true, added: state.sessions.length };
+    }
+    let added = 0;
+    const have = new Set(state.sessions.map((x) => x.id));
+    for (const x of d.sessions || []) if (!have.has(x.id)) { state.sessions.push(x); added++; }
+    const haveR = new Set(state.routines.map((r) => r.id));
+    for (const r of d.routines || []) if (!haveR.has(r.id) && !(state.seeded || []).includes(r.id)) state.routines.push(r);
+    const haveE = new Set(state.customExercises.map((e) => e.id));
+    for (const e of d.customExercises || []) if (!haveE.has(e.id)) state.customExercises.push(e);
+    return { restored: false, added };
+  }
+  async function cloudPull({ silent = false } = {}) {
+    if (!syncEnabled()) return null;
+    if (!navigator.onLine) { if (!silent) toast('Sin conexión'); return null; }
+    try {
+      const remote = await cloudRequest('GET');
+      syncCfg().lastError = null;
+      if (!remote) { await cloudPush(); return { restored: false, added: 0, first: true }; }
+      const result = mergeCloud(remote);
+      save();
+      syncCfg().lastSyncAt = new Date().toISOString(); persistQuiet();
+      if (result.restored) toast(`☁️ Restauradas ${result.added} sesiones desde la nube`);
+      else if (result.added && !silent) toast(`☁️ ${result.added} sesiones nuevas desde la nube`);
+      await cloudPush();
+      return result;
+    } catch (e) {
+      syncCfg().lastError = e.message || 'No se pudo conectar'; persistQuiet();
+      if (!silent) toast('☁️ ' + syncCfg().lastError);
+      return null;
+    }
+  }
+  async function connectCloud(phrase) {
+    if (normalizePhrase(phrase).length < 8) { toast('Usa una frase de al menos 8 caracteres'); return false; }
+    syncCfg().key = await syncKeyFromPhrase(phrase);
+    syncCfg().lastError = null; persistQuiet();
+    const r = await cloudPull();
+    if (!r) { syncCfg().key = null; persistQuiet(); return false; }
+    if (r.first) toast('☁️ Copia en la nube creada'); else if (!r.restored && !r.added) toast('☁️ Nube conectada');
+    return true;
+  }
+  function disconnectCloud() {
+    clearTimeout(cloudPushTimer);
+    state.settings.sync = { key: null, url: syncCfg().url, lastSyncAt: null, lastError: null };
+    persistQuiet();
+  }
+  window.addEventListener('online', () => { if (cloudDirty) cloudPush(); });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && cloudDirty) cloudPush(); });
 
   /* ---------- Copia espejo en IndexedDB ----------
      Segunda copia de los datos. Si localStorage aparece vacío (purga del navegador, limpieza
@@ -392,6 +513,12 @@
     view.append(el('div', { class: 'section-head' },
       el('h1', {}, 'Rutinas'),
       el('button', { class: 'btn btn-accent btn-sm', onclick: () => startEditor(null) }, '+ Nueva')));
+    if (!syncEnabled() && !state.sessions.length) {
+      view.append(el('div', { class: 'card row between mb', style: { borderColor: 'var(--accent)' } },
+        el('div', { class: 'grow' }, el('div', { style: { fontWeight: 700 } }, '☁️ ¿Tenías datos guardados?'),
+          el('div', { class: 'small muted' }, 'Conecta la copia en la nube con tu frase para recuperarlos, o actívala ahora para no perderlos.')),
+        el('button', { class: 'btn btn-accent btn-sm', onclick: openSettings }, 'Conectar')));
+    }
 
     if (!state.routines.length) {
       view.append(el('div', { class: 'empty' }, el('div', { class: 'big' }, '📋'), 'Aún no tienes rutinas. Crea la primera.'));
@@ -833,10 +960,53 @@
         el('label', { class: 'field', style: { marginBottom: 0 } }, el('span', {}, 'Segundos'), restInput),
         el('p', { class: 'small muted', style: { margin: '.5rem 0 0' } }, 'Además del aviso, la app vibra y suena si está en primer plano.')),
 
+      cloudCard(),
       storageCard(),
 
       el('button', { class: 'btn btn-accent btn-block', onclick: () => { close(); render(); } }, 'Listo')));
     function reopen() { close(); openSettings(); }
+  }
+  function cloudCard() {
+    const c = syncCfg();
+    const card = el('div', { class: 'card mb' });
+    const render_ = () => {
+      card.replaceChildren(el('div', { class: 'row between' }, el('h3', {}, '☁️ Copia en la nube'),
+        syncEnabled() ? el('span', { class: 'chip ' + (c.lastError ? 'accent' : 'ok') }, c.lastError ? 'Con error' : 'Conectada') : el('span', { class: 'chip' }, 'Sin conectar')));
+      if (!syncEnabled()) {
+        const phrase = el('input', { class: 'input', type: 'password', placeholder: 'Tu frase secreta (mín. 8 caracteres)', autocomplete: 'off' });
+        const show = el('input', { type: 'checkbox', onchange: () => { phrase.type = show.checked ? 'text' : 'password'; } });
+        const btn = el('button', { class: 'btn btn-accent btn-block', onclick: async () => {
+          btn.disabled = true; btn.textContent = 'Conectando…';
+          const ok = await connectCloud(phrase.value);
+          btn.disabled = false; btn.textContent = 'Conectar';
+          if (ok) { render_(); render(); }
+        } }, 'Conectar');
+        card.append(
+          el('p', { class: 'small muted' }, 'Guarda tu progreso en la nube con una frase que solo tú conoces. Si el teléfono borra la app, vuelve a escribir la frase y recuperas todo. También sirve para usar la app en dos dispositivos.'),
+          el('label', { class: 'field' }, el('span', {}, 'Frase secreta'), phrase),
+          el('label', { class: 'row small muted', style: { gap: '.5rem', marginBottom: '.6rem' } }, show, 'Mostrar frase'),
+          btn,
+          el('p', { class: 'small muted', style: { marginTop: '.5rem' } }, 'La frase nunca sale del teléfono: solo se envía una huella cifrada. Elige una frase larga y guárdala en un lugar seguro.'));
+      } else {
+        const d = c.lastSyncAt ? Math.round((Date.now() - new Date(c.lastSyncAt)) / 60000) : null;
+        card.append(
+          el('p', { class: 'small muted' }, c.lastError ? `⚠️ ${c.lastError}` : (d === null ? 'Aún no se ha sincronizado.' : d < 1 ? '✅ Sincronizada hace un momento.' : d < 60 ? `✅ Sincronizada hace ${d} min.` : `✅ Sincronizada el ${fmtDate(c.lastSyncAt)} a las ${fmtTime(c.lastSyncAt)}.`),
+            ' Cada cambio se sube solo en unos segundos.'),
+          el('div', { class: 'row wrap' },
+            el('button', { class: 'btn btn-sm', onclick: async (e) => { e.target.disabled = true; await cloudPull(); e.target.disabled = false; render_(); render(); } }, '🔄 Sincronizar ahora'),
+            el('button', { class: 'btn btn-sm btn-danger', onclick: async () => {
+              if (!(await confirmDialog('Desconectar la nube', 'Los datos del teléfono se conservan y la copia en la nube no se borra. Podrás reconectar con la misma frase.', 'Desconectar', true))) return;
+              disconnectCloud(); render_();
+            } }, 'Desconectar')));
+      }
+      const adv = el('details', { class: 'info', style: { marginTop: '.6rem' } }, el('summary', {}, 'Avanzado: servidor'),
+        el('div', { style: { padding: '0 .8rem .7rem' } },
+          el('input', { class: 'input', placeholder: `Por defecto: ${SYNC_DEFAULT_URL} (mismo dominio)`, value: c.url || '', onchange: (e) => { c.url = e.target.value.trim(); persistQuiet(); } }),
+          el('div', { class: 'small muted', style: { marginTop: '.3rem' } }, 'Solo si el Worker está en otra dirección (p. ej. https://gym-sync.tu-cuenta.workers.dev/api/backup).')));
+      card.append(adv);
+    };
+    render_();
+    return card;
   }
   function storageCard() {
     const status = el('div', { class: 'small muted' }, 'Comprobando…');
@@ -1132,7 +1302,7 @@
   async function exportData() {
     const now = new Date();
     const name = `gym-tracker-${now.toISOString().slice(0, 10)}.json`;
-    const json = JSON.stringify({ routines: state.routines, customExercises: state.customExercises, sessions: state.sessions, settings: state.settings, exportedAt: now.toISOString() }, null, 2);
+    const json = JSON.stringify({ routines: state.routines, customExercises: state.customExercises, sessions: state.sessions, settings: { rest: state.settings.rest, notify: state.settings.notify }, exportedAt: now.toISOString() }, null, 2);
     const markDone = () => { state.settings.lastExportAt = now.toISOString(); save(); toast('Copia guardada'); render(); };
     // En el móvil, la hoja de compartir permite guardar en Archivos, Drive, WhatsApp, etc.
     try {
@@ -1178,7 +1348,7 @@
         } else {
           state.sessions = data.sessions; state.routines = data.routines; state.customExercises = data.customExercises || [];
         }
-        if (data.settings) state.settings = { ...state.settings, ...data.settings };
+        if (data.settings) state.settings = { ...state.settings, ...data.settings, sync: state.settings.sync };
         save(); render(); toast('Datos importados');
       } catch (_) { toast('Archivo no válido'); }
     });
@@ -1231,6 +1401,6 @@
   /* ---------- Arranque ---------- */
   if (!state.active) state.ui.screen = 'tab';
   if (state.ui.screen === 'editor') state.ui.screen = 'tab';
-  restoreFromMirrorIfNeeded().finally(() => { if (!restoring) save(); requestPersistentStorage(); });
+  restoreFromMirrorIfNeeded().finally(() => { if (restoring) return; save(); requestPersistentStorage(); cloudPull({ silent: true }).then((r) => { if (r && (r.restored || r.added)) render(); }); });
   render();
 })();
