@@ -1,5 +1,7 @@
 # Gym Tracker (PWA)
 
+**App publicada en: https://gym.consultoriaconfia.com**
+
 App web instalable (PWA) para llevar el seguimiento de rutinas de gimnasio:
 
 - **Rutinas** con nombre, lista de ejercicios, series y repeticiones objetivo.
@@ -24,13 +26,23 @@ python3 -m http.server 8080
 
 ## Publicar
 
-El workflow `.github/workflows/pages.yml` despliega automáticamente a GitHub Pages al hacer push a `main`.
-Activa Pages en *Settings → Pages → Source: GitHub Actions* la primera vez.
+La app se publica con **Cloudflare Pages**, conectado a este repositorio: cada push a la rama
+`claude/pwa-gym-routine-tracker-xu2pm2` se despliega automáticamente en https://gym.consultoriaconfia.com
+(sin comando de build, directorio de salida `/`). El dominio propio da a la app su propio
+almacenamiento en el navegador, independiente de otras apps publicadas en `github.io`.
+
+El workflow `.github/workflows/pages.yml` (GitHub Pages) se conserva como alternativa; solo actúa si existe una rama `main`.
 
 ## Instalar en el teléfono
 
+Abre https://gym.consultoriaconfia.com y:
+
 - **Android (Chrome)**: pulsa "Instalar app" en la cabecera o *Menú → Instalar aplicación*.
 - **iPhone (Safari)**: *Compartir → Añadir a pantalla de inicio*.
+
+> Si Chrome dice que la app ya está instalada, búscala en el cajón de aplicaciones o en
+> *Ajustes → Aplicaciones*. No borres los datos del navegador: eso elimina el historial de la app.
+> Guarda antes una copia desde *Ajustes → Tus datos*.
 
 ## Estructura
 
