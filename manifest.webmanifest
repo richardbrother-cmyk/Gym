@@ -2,7 +2,7 @@
   "name": "Gym Tracker - Rutinas",
   "short_name": "Gym Tracker",
   "description": "Seguimiento de rutinas de gimnasio: series, repeticiones, peso e histórico de progreso.",
-  "start_url": "./index.html",
+  "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",

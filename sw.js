@@ -1,8 +1,7 @@
 /* Service worker: cache-first app shell + media so the app works offline. */
-const VERSION = 'gym-tracker-v8';
+const VERSION = 'gym-tracker-v9';
 const SHELL = [
   './',
-  './index.html',
   './styles.css',
   './app.js',
   './exercise-info.js',
@@ -55,19 +54,42 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // Navegaciones (abrir la app, incluida la URL de inicio): se sirve el shell cacheado y se
+  // actualiza en segundo plano. Nunca se devuelve una respuesta redirigida (ERR_FAILED).
+  if (request.mode === 'navigate') {
+    event.respondWith(
+      caches.match('./').then((cached) => {
+        const network = fetch('./', { cache: 'no-cache' }).then((res) => {
+          if (res && res.ok) caches.open(VERSION).then((c) => c.put('./', unredirect(res.clone())));
+          return res;
+        });
+        if (cached) { network.catch(() => {}); return unredirect(cached); }
+        return network.then(unredirect).catch(() => cached);
+      })
+    );
+    return;
+  }
+
   event.respondWith(
     caches.match(request, { ignoreSearch: true }).then((cached) => {
       const network = fetch(request).then((res) => {
         if (res && res.ok) {
-          const copy = res.clone();
+          const copy = unredirect(res.clone());
           caches.open(VERSION).then((c) => c.put(request, copy));
         }
         return res;
       }).catch(() => cached);
-      return cached || network;
+      return cached ? unredirect(cached) : network;
     })
   );
 });
+
+// Una respuesta con `redirected: true` no puede usarse para responder a una navegación;
+// se reconstruye con el mismo cuerpo y cabeceras.
+function unredirect(res) {
+  if (!res || !res.redirected) return res;
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers: res.headers });
+}
 
 async function rangeFromCache(request) {
   const cached = await caches.match(request.url, { ignoreSearch: true });
@@ -117,7 +139,7 @@ self.addEventListener('message', (event) => {
           tag: 'rest',
           renotify: true,
           vibrate: [200, 100, 200],
-          data: { url: './index.html' },
+          data: { url: './' },
         });
         const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
         clients.forEach((c) => c.postMessage({ type: 'rest:fired' }));
@@ -134,7 +156,7 @@ self.addEventListener('notificationclick', (event) => {
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
       const c = clients.find((x) => 'focus' in x);
       if (c) return c.focus();
-      return self.clients.openWindow('./index.html');
+      return self.clients.openWindow('./');
     })
   );
 });
