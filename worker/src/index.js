@@ -17,6 +17,9 @@ export default {
     const url = new URL(request.url);
     const cors = corsHeaders(request, env);
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+    // Solo /api/* es del Worker. Cualquier otra ruta se deja pasar a la app (Cloudflare Pages),
+    // así una ruta demasiado amplia (p. ej. gym.consultoriaconfia.com/*) no rompe el sitio.
+    if (!url.pathname.startsWith('/api/')) return fetch(request);
     if (!url.pathname.endsWith('/api/backup')) return json({ error: 'No encontrado' }, 404, cors);
 
     const syncKey = request.headers.get('X-Sync-Key') || '';

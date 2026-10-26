@@ -38,6 +38,17 @@ curl -i https://gym.consultoriaconfia.com/api/backup -H "X-Sync-Key: $(printf 'p
 # → 200 {"exists":false}  (correcto: aún no hay copia para ese código)
 ```
 
+## Si el dominio muestra `{"error":"No encontrado"}` en lugar de la app
+
+El Worker está capturando todo el dominio. En el Worker → **Settings → Domains & Routes**:
+
+- No debe haber un **Custom Domain** `gym.consultoriaconfia.com` (eso reemplaza por completo al
+  sitio de Pages). Si existe, elimínalo.
+- Debe haber solo una **Route** con el patrón exacto `gym.consultoriaconfia.com/api/*`.
+
+Desde la versión actual el Worker deja pasar a la app cualquier ruta que no empiece por `/api/`,
+pero eso solo funciona con una Route, no con un Custom Domain.
+
 ## Seguridad
 
 - La frase nunca sale del teléfono: la app envía su SHA-256 y el Worker lo vuelve a
