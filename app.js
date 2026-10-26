@@ -109,7 +109,7 @@
       sessions: [],
       active: null,
       settings: { rest: DEFAULT_REST, notify: true, sync: { key: null, url: '', lastSyncAt: null, lastError: null } },
-      ui: { tab: 'routines', screen: 'tab', progressEx: null, progressMetric: 'maxWeight' },
+      ui: { tab: 'routines', screen: 'tab', progressEx: null, progressMetric: 'maxWeight', progressRange: 'Todo' },
     };
     if (!saved) return base;
     // Rutinas de ejemplo añadidas en versiones nuevas: se agregan una sola vez (si el usuario las borra, no vuelven).
@@ -1170,6 +1170,7 @@
       el('div', { class: 'stat' }, el('div', { class: 'v' }, week), el('div', { class: 'l' }, 'Esta semana')),
       el('div', { class: 'stat' }, el('div', { class: 'v' }, state.sessions.length), el('div', { class: 'l' }, 'Total')),
       el('div', { class: 'stat' }, el('div', { class: 'v' }, Math.round(state.sessions.reduce((n, s) => n + s.entries.reduce((m, e) => m + (sessionExerciseStats(e)?.volume || 0), 0), 0) / 1000 * 10) / 10 + ' t'), el('div', { class: 'l' }, 'Volumen total'))));
+    view.append(activityCalendar());
 
     const list = el('div', { class: 'stack' });
     const sorted = state.sessions.slice().sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt));
@@ -1193,7 +1194,7 @@
       const card = el('div', { class: 'card session-card clickable', onclick: (e) => { if (e.target.closest('button')) return; details.hidden = !details.hidden; } },
         el('div', { class: 'row between' },
           el('div', {}, el('div', { class: 'date' }, fmtDate(s.startedAt)), el('div', { class: 'small muted' }, `${s.routineName} · ${fmtTime(s.startedAt)} · ${fmtDur(s.startedAt, s.finishedAt)}`)),
-          el('div', { style: { textAlign: 'right' } }, el('div', { style: { fontWeight: 700 } }, `${Math.round(vol)} kg`), el('div', { class: 'small muted' }, `${s.entries.reduce((n, e) => n + e.sets.length, 0)} series`))),
+          el('div', { style: { textAlign: 'right', whiteSpace: 'nowrap' } }, el('div', { style: { fontWeight: 700, fontVariantNumeric: 'tabular-nums' } }, `${fmtNumOnly(vol)} kg`), el('div', { class: 'small muted' }, `${s.entries.reduce((n, e) => n + e.sets.length, 0)} series`))),
         details);
       list.append(card);
     }
@@ -1209,11 +1210,36 @@
 
   /* ---------- Progreso ---------- */
   const METRICS = {
-    maxWeight: { label: 'Peso máx (kg)', fmt: (v) => fmtW(v) },
-    volume: { label: 'Volumen (kg)', fmt: (v) => Math.round(v) + ' kg' },
-    e1rm: { label: '1RM estimado', fmt: (v) => fmtW(v) },
-    reps: { label: 'Reps totales', fmt: (v) => v + ' reps' },
+    maxWeight: { label: 'Peso máx', unit: 'kg', fmt: (v) => fmtW(v) },
+    volume: { label: 'Volumen', unit: 'kg', fmt: (v) => Math.round(v) + ' kg' },
+    e1rm: { label: '1RM est.', unit: 'kg', fmt: (v) => fmtW(v) },
+    reps: { label: 'Reps', unit: 'reps', fmt: (v) => v + ' reps' },
   };
+  const RANGES = { '1M': 30, '3M': 91, '6M': 182, 'Todo': null };
+  const DAY = 864e5;
+  const fmtDay = (iso) => new Date(iso).toLocaleDateString('es', { day: 'numeric', month: 'short' });
+  const fmtPct = (p) => (p >= 0 ? '+' : '−') + Math.abs(Math.round(p * 100)) + '%';
+
+  // Serie de valores de una métrica por sesión, con marca de récord (valor > todos los anteriores).
+  function metricSeries(exerciseId, metric) {
+    let best = -Infinity;
+    return historyFor(exerciseId).map((h) => {
+      const y = h.stats[metric];
+      const pr = y > best && best !== -Infinity;
+      best = Math.max(best, y);
+      return { t: new Date(h.session.startedAt).getTime(), x: h.session.startedAt, y, pr, h };
+    });
+  }
+  // Variación frente al valor de hace ~30 días (o el primero si no hay tanto histórico).
+  function trendOf(series) {
+    if (series.length < 2) return null;
+    const last = series[series.length - 1];
+    const cutoff = last.t - 30 * DAY;
+    const ref = series.slice().reverse().find((p) => p.t <= cutoff) || series[0];
+    if (!ref.y) return null;
+    return { pct: (last.y - ref.y) / ref.y, delta: last.y - ref.y, since: ref.x };
+  }
+
   function renderProgress() {
     view.append(el('div', { class: 'section-head' }, el('h1', {}, 'Progreso')));
     const exercised = allExercises().filter((e) => historyFor(e.id).length);
@@ -1223,65 +1249,227 @@
       return;
     }
     if (!exercised.some((e) => e.id === state.ui.progressEx)) state.ui.progressEx = exercised[0].id;
-    const select = el('select', { class: 'input', onchange: (e) => { state.ui.progressEx = e.target.value; save(); render(); } },
-      exercised.map((e) => el('option', { value: e.id, selected: e.id === state.ui.progressEx }, e.name)));
-    view.append(el('label', { class: 'field' }, el('span', {}, 'Ejercicio'), select));
+    const metric = state.ui.progressMetric;
+    const range = state.ui.progressRange || 'Todo';
 
-    const metricRow = el('div', { class: 'row wrap mb', style: { gap: '.4rem' } });
-    for (const [k, m] of Object.entries(METRICS)) {
-      metricRow.append(el('button', { class: 'chip' + (k === state.ui.progressMetric ? ' accent' : ''), style: { cursor: 'pointer', border: k === state.ui.progressMetric ? '1px solid var(--accent)' : undefined },
-        onclick: () => { state.ui.progressMetric = k; save(); render(); } }, m.label));
-    }
-    view.append(metricRow);
+    // Selector de ejercicio: tarjetas con miniatura, última marca y sparkline, ordenadas por última sesión.
+    const strip = el('div', { class: 'ex-strip' });
+    exercised
+      .map((e) => ({ e, series: metricSeries(e.id, metric) }))
+      .sort((a, b) => b.series[b.series.length - 1].t - a.series[a.series.length - 1].t)
+      .forEach(({ e, series }) => {
+        const last = series[series.length - 1];
+        const tr = trendOf(series);
+        strip.append(el('button', { class: 'ex-card' + (e.id === state.ui.progressEx ? ' selected' : ''), onclick: () => { state.ui.progressEx = e.id; save(); render(); } },
+          el('img', { src: thumbSrc(e), alt: '', loading: 'lazy' }),
+          el('div', { class: 'name' }, e.name),
+          el('div', { class: 'row between', style: { alignItems: 'flex-end' } },
+            el('div', {}, el('div', { class: 'val' }, METRICS[metric].fmt(last.y)),
+              tr ? el('div', { class: 'trend ' + (tr.pct >= 0 ? 'up' : 'down') }, (tr.pct >= 0 ? '▲ ' : '▼ ') + fmtPct(tr.pct)) : el('div', { class: 'trend muted' }, `${series.length} sesión${series.length === 1 ? '' : 'es'}`)),
+            sparkline(series.slice(-12).map((p) => p.y)))));
+      });
+    view.append(strip);
+    requestAnimationFrame(() => { const c = strip.querySelector('.selected'); if (c) strip.scrollLeft = Math.max(0, c.offsetLeft - (strip.clientWidth - c.offsetWidth) / 2); });
+
+    // Filtros: métrica y rango, en una sola fila.
+    const filters = el('div', { class: 'filters' });
+    const seg = (items, current, onPick) => el('div', { class: 'seg' }, items.map(([k, label]) => el('button', { class: 'seg-btn' + (k === current ? ' on' : ''), onclick: () => onPick(k) }, label)));
+    filters.append(
+      seg(Object.entries(METRICS).map(([k, m]) => [k, m.label]), metric, (k) => { state.ui.progressMetric = k; save(); render(); }),
+      seg(Object.keys(RANGES).map((k) => [k, k]), range, (k) => { state.ui.progressRange = k; save(); render(); }));
+    view.append(filters);
 
     const ex = getExercise(state.ui.progressEx);
-    const hist = historyFor(ex.id);
-    const metric = state.ui.progressMetric;
-    const vals = hist.map((h) => h.stats[metric]);
-    const first = vals[0], lastV = vals[vals.length - 1], best = Math.max(...vals);
-    const delta = lastV - first;
-    view.append(el('div', { class: 'stats four' },
-      el('div', { class: 'stat' }, el('div', { class: 'v' }, METRICS[metric].fmt(lastV)), el('div', { class: 'l' }, 'Último')),
-      el('div', { class: 'stat' }, el('div', { class: 'v' }, METRICS[metric].fmt(best)), el('div', { class: 'l' }, 'Mejor')),
-      el('div', { class: 'stat' }, el('div', { class: 'v', style: { color: delta >= 0 ? 'var(--ok)' : 'var(--danger)' } }, (delta >= 0 ? '+' : '') + METRICS[metric].fmt(delta)), el('div', { class: 'l' }, 'Desde el inicio')),
-      el('div', { class: 'stat' }, el('div', { class: 'v' }, hist.length), el('div', { class: 'l' }, 'Sesiones'))));
+    const full = metricSeries(ex.id, metric);
+    const days = RANGES[range];
+    const series = days ? full.filter((p) => p.t >= Date.now() - days * DAY) : full;
+    const last = full[full.length - 1];
+    const bestP = full.reduce((a, p) => (p.y > a.y ? p : a), full[0]);
+    const tr = trendOf(full);
+    const e1 = full[full.length - 1].h.stats.e1rm;
 
-    view.append(el('div', { class: 'card' }, chart(hist.map((h) => ({ x: h.session.startedAt, y: h.stats[metric] })), METRICS[metric].fmt)));
+    // Cabecera de tendencia
+    view.append(el('div', { class: 'card hero' },
+      el('div', { class: 'row between', style: { alignItems: 'flex-start' } },
+        el('div', {},
+          el('div', { class: 'small muted' }, ex.name, ' · ', METRICS[metric].label.toLowerCase()),
+          el('div', { class: 'hero-v' }, fmtNumOnly(last.y), el('span', { class: 'unit' }, ' ' + METRICS[metric].unit)),
+          tr ? el('div', { class: 'trend ' + (tr.pct >= 0 ? 'up' : 'down') }, (tr.pct >= 0 ? '▲ ' : '▼ ') + fmtPct(tr.pct) + ' ', el('span', { class: 'muted' }, `desde el ${fmtDay(tr.since)}`)) : el('div', { class: 'small muted' }, 'Registra más sesiones para ver la tendencia')),
+        el('div', { class: 'hero-side' },
+          el('div', {}, el('div', { class: 'small muted' }, 'Mejor'), el('div', { class: 'hv' }, METRICS[metric].fmt(bestP.y)), el('div', { class: 'small muted' }, fmtDay(bestP.x))),
+          metric !== 'e1rm' ? el('div', {}, el('div', { class: 'small muted' }, '1RM est.'), el('div', { class: 'hv' }, fmtW(e1))) : el('div', {}, el('div', { class: 'small muted' }, 'Sesiones'), el('div', { class: 'hv' }, full.length))))));
 
-    const rows = el('div', { class: 'card mt' }, el('h3', {}, 'Sesiones'));
-    hist.slice().reverse().forEach((h) => rows.append(el('div', { class: 'ex-line', style: { display: 'flex', justifyContent: 'space-between', gap: '.5rem', padding: '.3rem 0', borderTop: '1px solid var(--line)', fontSize: '.9rem' } },
-      el('span', { class: 'muted' }, fmtDate(h.session.startedAt)),
-      el('span', {}, setsSummary(h.entry)))));
+    // Gráfica
+    const card = el('div', { class: 'card chart-card' });
+    if (!series.length) card.append(el('div', { class: 'empty', style: { padding: '1.5rem' } }, 'Sin sesiones en este rango.'));
+    else card.append(lineChart(series, METRICS[metric]));
+    view.append(card);
+
+    // Sesiones del rango
+    const rows = el('div', { class: 'card mt' }, el('div', { class: 'row between' }, el('h3', {}, 'Sesiones'), el('span', { class: 'chip' }, `${series.length} en el rango`)));
+    series.slice().reverse().forEach((p) => rows.append(el('div', { class: 'sess-row' },
+      el('span', { class: 'muted' }, fmtDate(p.x)),
+      el('span', { class: 'sets' }, setsSummary(p.h.entry), p.pr ? el('span', { class: 'pr-badge' }, ' 🏆') : null))));
     view.append(rows);
     view.append(dataTools());
   }
+  const fmtNumOnly = (v) => (Math.abs(v) >= 1000 ? Math.round(v).toLocaleString('es') : fmtNum(v));
 
-  function chart(points, fmt) {
-    const W = 600, H = 260, P = { l: 48, r: 14, t: 14, b: 34 };
-    const svg = svgEl('svg', { class: 'chart', viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Gráfica de progreso' });
-    if (!points.length) return svg;
-    const ys = points.map((p) => p.y);
-    let min = Math.min(...ys), max = Math.max(...ys);
-    if (min === max) { min = min * 0.8; max = max * 1.2 || 1; }
-    const padY = (max - min) * 0.1; min = Math.max(0, min - padY); max += padY;
-    const xAt = (i) => P.l + (points.length === 1 ? (W - P.l - P.r) / 2 : (i / (points.length - 1)) * (W - P.l - P.r));
-    const yAt = (v) => P.t + (1 - (v - min) / (max - min)) * (H - P.t - P.b);
-    for (let g = 0; g <= 4; g++) {
-      const v = min + ((max - min) * g) / 4, y = yAt(v);
-      svg.append(svgEl('line', { class: 'grid', x1: P.l, x2: W - P.r, y1: y, y2: y }));
-      svg.append(svgEl('text', { x: P.l - 6, y: y + 4, 'text-anchor': 'end' }, Math.round(v * 10) / 10));
+  // Curva suavizada (Catmull-Rom → Bézier) a partir de puntos en píxeles.
+  function smoothPath(pts) {
+    if (pts.length < 2) return pts.length ? `M${pts[0].x},${pts[0].y}` : '';
+    let d = `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2;
+      const c1x = p1.x + (p2.x - p0.x) / 6, c1y = p1.y + (p2.y - p0.y) / 6;
+      const c2x = p2.x - (p3.x - p1.x) / 6, c2y = p2.y - (p3.y - p1.y) / 6;
+      d += ` C${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${p2.x.toFixed(1)},${p2.y.toFixed(1)}`;
     }
-    const step = Math.max(1, Math.ceil(points.length / 6));
-    points.forEach((p, i) => {
-      if (i % step === 0 || i === points.length - 1) svg.append(svgEl('text', { x: xAt(i), y: H - 10, 'text-anchor': 'middle' }, fmtShort(p.x)));
-    });
-    svg.append(svgEl('path', { class: 'line', d: points.map((p, i) => `${i ? 'L' : 'M'}${xAt(i).toFixed(1)},${yAt(p.y).toFixed(1)}`).join(' ') }));
-    points.forEach((p, i) => {
-      const c = svgEl('circle', { class: 'dot', cx: xAt(i), cy: yAt(p.y), r: 4.5 });
-      c.append(svgEl('title', {}, `${fmtDate(p.x)}: ${fmt(p.y)}`));
-      svg.append(c);
-    });
+    return d;
+  }
+  function sparkline(values) {
+    const W = 72, H = 26, P = 3;
+    const svg = svgEl('svg', { class: 'spark', viewBox: `0 0 ${W} ${H}`, 'aria-hidden': 'true' });
+    if (values.length < 2) return svg;
+    const min = Math.min(...values), max = Math.max(...values);
+    const pts = values.map((v, i) => ({ x: P + (i / (values.length - 1)) * (W - 2 * P), y: max === min ? H / 2 : P + (1 - (v - min) / (max - min)) * (H - 2 * P) }));
+    svg.append(svgEl('path', { class: 'spark-line', d: smoothPath(pts) }));
+    const l = pts[pts.length - 1];
+    svg.append(svgEl('circle', { class: 'spark-dot', cx: l.x, cy: l.y, r: 2.5 }));
     return svg;
+  }
+
+  // Gráfica de líneas con eje temporal real, área, récords y cursor con tooltip.
+  function lineChart(series, m) {
+    const W = 600, H = 250, P = { l: 44, r: 16, t: 18, b: 30 };
+    const wrap = el('div', { class: 'chart-wrap' });
+    const svg = svgEl('svg', { class: 'chart', viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': `Evolución de ${m.label}` });
+    const ys = series.map((p) => p.y);
+    let lo = Math.min(...ys), hi = Math.max(...ys);
+    if (lo === hi) { lo = lo * 0.85; hi = hi * 1.15 || 1; }
+    const pad = (hi - lo) * 0.12; lo = Math.max(0, lo - pad); hi += pad;
+    // Escala "bonita": paso 1, 2, 2.5 o 5 × 10^k, con 3 o 4 divisiones
+    const raw = (hi - lo) / 3, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((v) => v >= raw) || raw;
+    const min = Math.floor(lo / step) * step, max = Math.ceil(hi / step) * step;
+    const divisions = Math.round((max - min) / step);
+    const t0 = series[0].t, t1 = series[series.length - 1].t;
+    const span = Math.max(t1 - t0, DAY);
+    const xAt = (t) => (series.length === 1 ? W / 2 : P.l + ((t - t0) / span) * (W - P.l - P.r));
+    const yAt = (v) => P.t + (1 - (v - min) / (max - min)) * (H - P.t - P.b);
+    const pts = series.map((p) => ({ x: xAt(p.t), y: yAt(p.y), p }));
+
+    // Rejilla y eje Y (4 líneas, valores redondeados)
+    for (let g = 0; g <= divisions; g++) {
+      const v = min + step * g, y = yAt(v);
+      svg.append(svgEl('line', { class: 'grid', x1: P.l, x2: W - P.r, y1: y, y2: y }));
+      svg.append(svgEl('text', { class: 'tick', x: P.l - 8, y: y + 4, 'text-anchor': 'end' }, fmtNumOnly(Math.round(v * 100) / 100)));
+    }
+    // Eje X: hasta 5 fechas repartidas
+    const n = Math.min(5, series.length);
+    const ticks = new Set();
+    for (let i = 0; i < n; i++) ticks.add(Math.round((i / Math.max(1, n - 1)) * (series.length - 1)));
+    [...ticks].forEach((i) => svg.append(svgEl('text', { class: 'tick', x: xAt(series[i].t), y: H - 8, 'text-anchor': i === 0 ? 'start' : i === series.length - 1 ? 'end' : 'middle' }, fmtDay(series[i].x))));
+
+    // Área + línea
+    const defs = svgEl('defs');
+    const grad = svgEl('linearGradient', { id: 'area-grad', x1: 0, y1: 0, x2: 0, y2: 1 });
+    grad.append(svgEl('stop', { offset: '0%', 'stop-color': 'var(--accent)', 'stop-opacity': '.18' }), svgEl('stop', { offset: '100%', 'stop-color': 'var(--accent)', 'stop-opacity': '0' }));
+    defs.append(grad); svg.append(defs);
+    const lineD = smoothPath(pts);
+    if (pts.length > 1) {
+      svg.append(svgEl('path', { class: 'area', d: `${lineD} L${pts[pts.length - 1].x.toFixed(1)},${(H - P.b).toFixed(1)} L${pts[0].x.toFixed(1)},${(H - P.b).toFixed(1)} Z` }));
+      svg.append(svgEl('path', { class: 'line', d: lineD }));
+    }
+    // Cursor
+    const cursor = svgEl('line', { class: 'cursor', x1: 0, x2: 0, y1: P.t, y2: H - P.b, hidden: true });
+    svg.append(cursor);
+    // Puntos (récords con anillo)
+    const dots = pts.map(({ x, y, p }) => {
+      const g = svgEl('g', { class: 'pt' + (p.pr ? ' pr' : '') });
+      if (p.pr) g.append(svgEl('circle', { class: 'ring', cx: x, cy: y, r: 8 }));
+      g.append(svgEl('circle', { class: 'dot', cx: x, cy: y, r: 4 }));
+      svg.append(g); return g;
+    });
+    const tip = el('div', { class: 'chart-tip', hidden: true });
+    wrap.append(svg, tip);
+
+    let active = -1;
+    function show(i) {
+      if (i === active || i < 0) return;
+      active = i;
+      const { x, y, p } = pts[i];
+      cursor.setAttribute('x1', x); cursor.setAttribute('x2', x); cursor.hidden = false;
+      dots.forEach((g, j) => g.classList.toggle('active', j === i));
+      tip.replaceChildren(
+        el('div', { class: 'tv' }, m.fmt(p.y), p.pr ? el('span', { class: 'pr-badge' }, ' 🏆 récord') : null),
+        el('div', { class: 'td' }, fmtDate(p.x)),
+        el('div', { class: 'ts' }, setsSummary(p.h.entry)));
+      tip.hidden = false;
+      const pct = x / W;
+      tip.style.left = `${pct * 100}%`;
+      tip.style.transform = `translateX(${pct > 0.6 ? '-100%' : pct < 0.25 ? '0' : '-50%'})`;
+      tip.style.top = `${Math.max(0, (y / H) * 100 - 30)}%`;
+    }
+    function nearest(clientX) {
+      const r = svg.getBoundingClientRect();
+      const xv = ((clientX - r.left) / r.width) * W;
+      let best = 0; pts.forEach((q, i) => { if (Math.abs(q.x - xv) < Math.abs(pts[best].x - xv)) best = i; });
+      return best;
+    }
+    svg.addEventListener('pointerdown', (e) => { show(nearest(e.clientX)); });
+    svg.addEventListener('pointermove', (e) => { if (e.pointerType === 'mouse' || e.buttons) show(nearest(e.clientX)); });
+    svg.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse') { cursor.hidden = true; tip.hidden = true; dots.forEach((g) => g.classList.remove('active')); active = -1; } });
+    svg.style.touchAction = 'pan-y';
+    return wrap;
+  }
+
+  // Calendario de actividad: últimas 12 semanas, intensidad por volumen; racha de semanas seguidas.
+  function activityCalendar() {
+    const byDay = new Map();
+    for (const s of state.sessions) {
+      const d = new Date(s.startedAt); d.setHours(0, 0, 0, 0);
+      const k = d.getTime();
+      const vol = s.entries.reduce((n, e) => n + (sessionExerciseStats(e)?.volume || 0), 0);
+      const cur = byDay.get(k) || { n: 0, vol: 0, names: [] };
+      cur.n++; cur.vol += vol; cur.names.push(s.routineName); byDay.set(k, cur);
+    }
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const dow = (today.getDay() + 6) % 7; // lunes = 0
+    const weeks = 12;
+    const start = new Date(today); start.setDate(today.getDate() - dow - (weeks - 1) * 7);
+    const maxVol = Math.max(1, ...[...byDay.values()].map((v) => v.vol));
+    const grid = el('div', { class: 'cal-grid' });
+    ['L', 'M', 'X', 'J', 'V', 'S', 'D'].forEach((d, i) => grid.append(el('span', { class: 'cal-lbl', style: { gridRow: i + 2, gridColumn: 1 } }, d)));
+    let lastMonth = -1;
+    for (let w = 0; w < weeks; w++) {
+      for (let d = 0; d < 7; d++) {
+        const date = new Date(start); date.setDate(start.getDate() + w * 7 + d);
+        const k = date.getTime();
+        if (d === 0 && date.getMonth() !== lastMonth) { lastMonth = date.getMonth(); grid.append(el('span', { class: 'cal-lbl cal-month', style: { gridRow: 1, gridColumn: w + 2 } }, date.toLocaleDateString('es', { month: 'short' }))); }
+        const v = byDay.get(k);
+        const level = !v ? 0 : Math.min(4, 1 + Math.floor((v.vol / maxVol) * 3.99));
+        const cell = el('button', { class: 'cal-cell l' + level + (k === today.getTime() ? ' today' : '') + (date > today ? ' future' : ''), style: { gridRow: d + 2, gridColumn: w + 2 },
+          'aria-label': `${date.toLocaleDateString('es', { weekday: 'long', day: 'numeric', month: 'long' })}: ${v ? `${v.n} sesión${v.n > 1 ? 'es' : ''}, ${Math.round(v.vol)} kg` : 'sin entrenamiento'}`,
+          onclick: () => toast(v ? `${fmtDay(date)}: ${v.names.join(', ')} · ${Math.round(v.vol)} kg` : `${fmtDay(date)}: sin entrenamiento`) });
+        grid.append(cell);
+      }
+    }
+    // Racha: semanas consecutivas (hasta la actual) con al menos una sesión
+    const weekKey = (t) => { const d = new Date(t); const dd = (d.getDay() + 6) % 7; d.setDate(d.getDate() - dd); d.setHours(0, 0, 0, 0); return d.getTime(); };
+    const weeksWith = new Set([...byDay.keys()].map(weekKey));
+    let streak = 0; let wk = weekKey(today);
+    if (!weeksWith.has(wk)) wk -= 7 * DAY; // la semana actual aún puede completarse
+    while (weeksWith.has(wk)) { streak++; wk -= 7 * DAY; }
+    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1).getTime();
+    const thisMonth = [...byDay.entries()].filter(([k]) => k >= monthStart).reduce((n, [, v]) => n + v.n, 0);
+    return el('div', { class: 'card mb' },
+      el('h3', {}, '📆 Actividad'),
+      el('div', { class: 'row wrap mb', style: { gap: '.4rem' } },
+        el('span', { class: 'chip ' + (streak ? 'ok' : '') }, `🔥 ${streak} semana${streak === 1 ? '' : 's'} seguidas`),
+        el('span', { class: 'chip' }, `${thisMonth} sesiones este mes`)),
+      el('div', { class: 'cal-scroll' }, grid),
+      el('div', { class: 'cal-legend small muted' }, 'Menos ', [0, 1, 2, 3, 4].map((l) => el('i', { class: 'cal-cell l' + l })), ' Más volumen'));
   }
 
   /* ---------- Exportar / importar ---------- */
