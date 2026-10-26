@@ -218,7 +218,7 @@ label.field > span { display: block; font-size: .8rem; color: var(--muted); marg
 .hero-v { font-size: 2.4rem; font-weight: 800; line-height: 1.05; letter-spacing: -.02em; font-variant-numeric: tabular-nums; margin: .15rem 0; }
 .hero-v .unit { font-size: 1rem; font-weight: 600; color: var(--muted); letter-spacing: 0; }
 .hero .trend { font-weight: 700; font-size: .9rem; }
-.hero-side { display: grid; gap: .5rem; text-align: right; }
+.hero-side { display: grid; gap: .5rem; text-align: right; white-space: nowrap; flex: none; padding-left: .5rem; }
 .hero-side .hv { font-weight: 700; font-variant-numeric: tabular-nums; }
 
 /* Gráfica */
@@ -327,3 +327,52 @@ details.info[open] summary::after { content: '−'; }
 .set-row .prev .u { font-size: .65rem; }
 .set-row .prev.empty { border-style: dotted; opacity: .5; }
 .set-row .prev:not(.empty):active { background: var(--card-2); }
+
+/* Historial: filtros, semanas y tarjetas de sesión */
+.filters-block { display: flex; flex-direction: column; gap: .5rem; margin-bottom: .8rem; }
+.filter-chips { display: flex; gap: .4rem; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+.filter-chips::-webkit-scrollbar { display: none; }
+.filter-chips .chip { flex: none; cursor: pointer; display: inline-flex; align-items: center; gap: .35rem; }
+.filter-chips .chip.accent { border-color: var(--accent); }
+.swatch { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--rc, var(--muted)); margin-right: .35rem; vertical-align: middle; flex: none; }
+.input.search { padding: .55rem .8rem; }
+.week-head { display: flex; justify-content: space-between; align-items: center; padding: .9rem .2rem .45rem; }
+.wk-title { font-weight: 700; font-size: .95rem; }
+.week-head .trend { font-size: .8rem; font-weight: 700; }
+.session-card { border-left: 3px solid var(--rc, var(--line)); padding-left: .85rem; margin-bottom: .55rem; }
+.session-card .date { font-weight: 700; }
+.session-card .sess-nums { text-align: right; white-space: nowrap; }
+.session-card .sess-nums .v { font-weight: 800; font-variant-numeric: tabular-nums; font-size: 1.05rem; }
+.vol-bar { height: 4px; background: var(--bg-2); border-radius: 999px; overflow: hidden; margin-top: .55rem; }
+.vol-bar > div { height: 100%; background: var(--rc, var(--accent)); border-radius: 999px; transition: width .4s ease; }
+.pr-chips { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .5rem; }
+.pr-chips .chip { font-size: .7rem; }
+.details-panel { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .25s ease; }
+.details-panel.open { grid-template-rows: 1fr; }
+.details-inner { overflow: hidden; }
+.details-panel.open .details-inner { margin-top: .6rem; border-top: 1px solid var(--line); padding-top: .6rem; }
+.session-card .ex-line { display: flex; justify-content: space-between; gap: .5rem; padding: .25rem 0; font-size: .9rem; }
+.session-card .ex-line .sets { color: var(--muted); text-align: right; }
+.session-card .ex-line.hit { color: var(--accent-2); }
+
+/* Vista general */
+.section-head .seg { margin-left: auto; }
+.chart-title { font-size: .85rem; color: var(--muted); font-weight: 600; margin: .2rem .6rem .4rem; }
+.chart.bars .bar .fill { fill: var(--accent); opacity: .45; transition: opacity .15s; }
+.chart.bars .bar.current .fill { opacity: 1; }
+.chart.bars .bar.empty .fill { opacity: .15; }
+.chart.bars .bar .base { fill: var(--card); }
+.chart.bars .bar .hit { fill: transparent; }
+.chart.bars .bar.active .fill, .chart.bars .bar:hover .fill { opacity: 1; }
+.chart.bars .bar:focus { outline: none; }
+.chart.bars .bar:focus .fill { opacity: 1; }
+.donut-wrap { display: flex; align-items: center; gap: 1rem; padding: .2rem .4rem .4rem; }
+.donut { width: 140px; height: 140px; flex: none; }
+.donut .seg { stroke-linecap: butt; }
+.donut-c { fill: var(--text); font-size: 22px; font-weight: 800; }
+.donut-l { fill: var(--muted); font-size: 11px; }
+.legend-list { flex: 1; min-width: 0; display: grid; gap: .35rem; font-size: .85rem; }
+.legend-row { display: flex; align-items: center; gap: .5rem; }
+.legend-row .swatch { margin: 0; width: 10px; height: 10px; border-radius: 3px; }
+.legend-row b { font-variant-numeric: tabular-nums; min-width: 2.6em; text-align: right; }
+@media (max-width: 380px) { .donut-wrap { flex-direction: column; align-items: stretch; } }
