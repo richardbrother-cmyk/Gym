@@ -1,5 +1,5 @@
 /* Service worker: cache-first app shell + media so the app works offline. */
-const VERSION = 'gym-tracker-v9';
+const VERSION = 'gym-tracker-v10';
 const SHELL = [
   './',
   './styles.css',

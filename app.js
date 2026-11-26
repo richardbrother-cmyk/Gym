@@ -373,13 +373,13 @@
     return close;
   }
 
-  function confirmDialog(title, text, okLabel = 'Confirmar', danger = false) {
+  function confirmDialog(title, text, okLabel = 'Confirmar', danger = false, cancelLabel = 'Cancelar') {
     return new Promise((resolve) => {
       const close = openModal(el('div', {},
         el('h2', {}, title),
         el('p', { class: 'muted' }, text),
         el('div', { class: 'row', style: { justifyContent: 'flex-end' } },
-          el('button', { class: 'btn btn-ghost', onclick: () => { close(); resolve(false); } }, 'Cancelar'),
+          el('button', { class: 'btn btn-ghost', onclick: () => { close(); resolve(false); } }, cancelLabel),
           el('button', { class: 'btn ' + (danger ? 'btn-danger' : 'btn-accent'), onclick: () => { close(); resolve(true); } }, okLabel),
         ),
       ));
@@ -467,6 +467,7 @@
     document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', state.ui.screen === 'tab' && t.dataset.tab === state.ui.tab));
     try { renderScreen(); }
     finally {
+      updateWorkoutTimer();
       if (keep) {
         window.scrollTo(0, y);
         requestAnimationFrame(() => { window.scrollTo(0, y); view.style.minHeight = ''; });
@@ -507,6 +508,26 @@
         el('div', { class: 'small muted' }, `${a.routineName} · ${done} series hechas · desde ${fmtTime(a.startedAt)}`)),
       el('button', { class: 'btn btn-accent btn-sm', onclick: () => go('workout') }, 'Continuar'));
   }
+
+  /* Cronómetro del entrenamiento en curso: vive en la barra superior, así se ve aunque se haga scroll. */
+  const timerBtn = $('#workout-timer');
+  const fmtElapsed = (ms) => {
+    const t = Math.max(0, Math.floor(ms / 1000));
+    const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), sec = t % 60;
+    return h ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`;
+  };
+  function updateWorkoutTimer() {
+    const a = state.active;
+    timerBtn.hidden = !a;
+    if (!a) return;
+    const ms = Date.now() - new Date(a.startedAt).getTime();
+    $('#workout-timer-t').textContent = fmtElapsed(ms);
+    timerBtn.setAttribute('aria-label', `Entrenamiento en curso: ${Math.floor(ms / 60000)} minutos. Abrir`);
+  }
+  timerBtn.addEventListener('click', () => { if (state.active) go('workout'); });
+  setInterval(updateWorkoutTimer, 1000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) updateWorkoutTimer(); });
+
 
   /* ---------- Rutinas ---------- */
   function renderRoutines() {
@@ -797,7 +818,7 @@
           if (alsoRoutine.checked && routine && routineIdx >= 0) routine.items.splice(routineIdx, 1);
           save(); render(); toast('Ejercicio quitado del entrenamiento');
         } }, '🗑️ Quitar de este entrenamiento'),
-        a.entries.length <= 1 ? el('p', { class: 'small muted', style: { textAlign: 'center' } }, 'No se puede quitar el único ejercicio; usa "Salir" para descartar el entrenamiento.') : null)));
+        a.entries.length <= 1 ? el('p', { class: 'small muted', style: { textAlign: 'center' } }, 'No se puede quitar el único ejercicio; usa "Cancelar rutina" para descartar el entrenamiento.') : null)));
   }
 
   function renderWorkout() {
@@ -815,6 +836,9 @@
         el('div', { class: 'small muted' }, `Ejercicio ${a.current + 1} de ${a.entries.length} · ${doneSets}/${totalSets} series`)),
       el('button', { class: 'btn btn-ok btn-sm', onclick: finishWorkout }, 'Finalizar')));
     view.append(el('div', { class: 'progress-bar' }, el('div', { style: { width: `${totalSets ? (doneSets / totalSets) * 100 : 0}%` } })));
+    view.append(el('div', { class: 'workout-meta' },
+      el('span', { class: 'small muted' }, `Iniciada a las ${fmtTime(a.startedAt)}`),
+      el('button', { class: 'btn btn-danger btn-sm', onclick: cancelWorkout }, '✕ Cancelar rutina')));
 
     // Selector rápido de ejercicio
     const strip = el('div', { class: 'row', style: { overflowX: 'auto', gap: '.4rem', paddingBottom: '.5rem', marginBottom: '.5rem' } });
@@ -1039,6 +1063,21 @@
     } catch (_) { toast('No se pudo mostrar la notificación'); }
   }
   $('#btn-settings').addEventListener('click', openSettings);
+
+  // Descarta el entrenamiento en curso sin guardar nada (p. ej. si se inició la rutina equivocada).
+  async function cancelWorkout() {
+    const a = state.active;
+    if (!a) return;
+    const done = a.entries.reduce((n, e) => n + e.sets.filter((s) => s.done).length, 0);
+    const msg = done
+      ? `Tienes ${done} ${done === 1 ? 'serie marcada que se perderá' : 'series marcadas que se perderán'}. "${a.routineName}" no se guardará en el historial.`
+      : `"${a.routineName}" se descartará y no se guardará nada en el historial.`;
+    if (!(await confirmDialog('¿Cancelar la rutina?', msg, 'Sí, cancelar', true, 'Seguir entrenando'))) return;
+    if (state.active !== a) return;
+    state.active = null; stopRest();
+    go('tab', 'routines');
+    toast('Rutina cancelada');
+  }
 
   async function finishWorkout() {
     const a = state.active;
